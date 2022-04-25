@@ -142,7 +142,8 @@ func (s *Server) udpServerStart() (err error) {
 			sess, exist := s.sessionMap[sID]
 			s.sessionMu.Unlock()
 			if exist {
-				sess.DataCb(buf[16:], seq)
+				doa.MustTrue(sID == sess.ID(), "sID == sess.ID()")
+				sess.DataCb(buf[16:dataLen], seq)
 			} else {
 				fmt.Println(sID, ",can not find")
 			}
