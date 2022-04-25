@@ -93,7 +93,7 @@ func (s *Server) processTcp(conn net.Conn) {
 		allRsp := x.AllRequest{}
 		err := reader.Decode(&allRsp)
 		if err != nil {
-			panic(err)
+			doa.PanicExceptIOEOF(err)
 		}
 		err = sess.CommandCb(conn, &allRsp)
 		if err != nil {
@@ -168,6 +168,7 @@ func (s *Server) Start() error {
 
 func (s *Server) Close() {
 	if s.udpConn != nil {
+
 		s.udpConn.Close()
 	}
 

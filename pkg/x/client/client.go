@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,10 @@ import (
 	"net"
 	"time"
 	"xaux/pkg/x"
+)
+
+const (
+	UDPSendLen = 1200
 )
 
 var (
@@ -25,6 +30,7 @@ type Client struct {
 	seq       uint32
 	agentIP   string
 	endMsg    string
+	buffer    bytes.Buffer
 }
 
 func NewClient(agentAddr string) (*Client, error) {
@@ -42,6 +48,7 @@ func NewClient(agentAddr string) (*Client, error) {
 		status:  x.StatusInit,
 		tcpConn: conn,
 		agentIP: addr.IP.String(),
+		seq:     1,
 	}
 	return client, nil
 }
@@ -51,6 +58,7 @@ func (c *Client) Close() {
 		c.tcpConn.Close()
 	}
 	if c.udpConn != nil {
+		c.sentBuffer(true)
 		c.udpConn.Close()
 	}
 }
@@ -122,6 +130,8 @@ func (c *Client) Send(data []byte) (err error) {
 		return ErrNotStart
 	}
 
+	c.buffer.Write(data)
+
 	if c.udpConn == nil {
 		addr := net.UDPAddr{
 			IP:   net.ParseIP(c.agentIP),
@@ -132,27 +142,44 @@ func (c *Client) Send(data []byte) (err error) {
 			return err
 		}
 	}
-	// 这里处理 IP 分片啊
-	dataLen := len(data)
-	bufAll := make([]byte, dataLen+16)
-	for {
-		sentLen := dataLen
-		if sentLen == 0 {
-			break
-		} else if sentLen > 1200 {
-			sentLen = 1200
-		}
-		dataLen -= sentLen
+	// 先判断一下长度
+	if c.buffer.Len() < UDPSendLen {
+		return nil
+	}
+	// 这里用 false ，因为每次写入buffer的数据是一个采样
+	return c.sentBuffer(false)
+}
 
-		buf := bufAll[0 : sentLen+16]
-		c.seq++
-		binary.BigEndian.PutUint32(buf[4:8], c.seq)
+func (c *Client) sentBuffer(sendALL bool) error {
+	// 这里处理 IP 分片啊
+	var err error = nil
+	bufAll := make([]byte, UDPSendLen+16)
+	for {
+		buf := bufAll[0:]
+		if c.buffer.Len() < UDPSendLen {
+			if sendALL {
+				buf = bufAll[0 : c.buffer.Len()+16]
+			} else {
+				buf = bufAll[0:16]
+			}
+		}
+
+		if len(buf) <= 16 {
+			break
+		}
+
 		binary.BigEndian.PutUint32(buf[0:4], c.sessionID)
-		copy(buf[16:], data)
+		binary.BigEndian.PutUint32(buf[4:8], c.seq)
+		_, err = c.buffer.Read(buf[16:])
+		if err != nil {
+			return err
+		}
+
 		_, err = c.udpConn.Write(buf)
 		if err != nil {
 			return err
 		}
+		c.seq++
 	}
 	return nil
 }
