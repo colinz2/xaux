@@ -94,6 +94,7 @@ func (s *Server) processTcp(conn net.Conn) {
 		err := reader.Decode(&allRsp)
 		if err != nil {
 			doa.PanicExceptIOEOF(err)
+			return
 		}
 		err = sess.CommandCb(conn, &allRsp)
 		if err != nil {
