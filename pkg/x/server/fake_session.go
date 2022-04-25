@@ -35,6 +35,27 @@ func (f *FakeSession) CommandCb(conn net.Conn, allResponse *x.AllRequest) error 
 	fmt.Println("client addr =", conn.RemoteAddr().String(), ":")
 	buf, _ := json.MarshalIndent(allResponse, "", " ")
 	fmt.Println(string(buf))
+
+	cmd := allResponse.Cmd
+	var rspBuf []byte
+	if cmd == x.CmdStart {
+		startRsp := x.StartResponse{
+			Cmd:       cmd,
+			SessionID: f.id,
+			UDPPort:   x.UDPPort,
+		}
+		rspBuf, _ = json.Marshal(&startRsp)
+	} else if cmd == x.CmdEnd {
+		endRsp := x.EndResponse{
+			Cmd: cmd,
+			Msg: "session end!",
+		}
+		rspBuf, _ = json.Marshal(&endRsp)
+	}
+	_, err := conn.Write(rspBuf)
+	if err != nil {
+		panic(err)
+	}
 	return nil
 }
 func (f *FakeSession) DataCb(data []byte, seq uint32) error {
