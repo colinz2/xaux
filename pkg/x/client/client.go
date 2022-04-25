@@ -33,6 +33,8 @@ type Client struct {
 	buffer    bytes.Buffer
 }
 
+// TODO 处理返回结果
+
 func NewClient(agentAddr string) (*Client, error) {
 	addr, err := net.ResolveTCPAddr("tcp", agentAddr)
 	if err != nil {

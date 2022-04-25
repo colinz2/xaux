@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	proxyAddr = flag.String("aa", "192.168.1.100:11024", "asr proxy address")
+	proxyAddr = flag.String("aa", "192.168.1.100:11024", "asr ai_proxy address")
 )
 
 func init() {
@@ -35,5 +35,4 @@ func main() {
 	fmt.Println("signal = ", sig)
 	sc.Release()
 	sc.Dump("xx.pcm")
-
 }
