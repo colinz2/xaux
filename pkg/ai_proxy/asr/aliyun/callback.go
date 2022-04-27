@@ -8,7 +8,7 @@ import (
 func onTaskFailed(text string, param interface{}) {
 	sess, ok := param.(*Session)
 	if !ok {
-		log.Default().Fatal("invalid logger")
+		log.Default().Fatal("invalid Session 1")
 		return
 	}
 
@@ -19,7 +19,7 @@ func onTaskFailed(text string, param interface{}) {
 func onStarted(text string, param interface{}) {
 	sess, ok := param.(*Session)
 	if !ok {
-		log.Default().Fatal("invalid logger")
+		log.Default().Fatal("invalid Session 2")
 		return
 	}
 
@@ -30,7 +30,7 @@ func onStarted(text string, param interface{}) {
 func onSentenceBegin(text string, param interface{}) {
 	sess, ok := param.(*Session)
 	if !ok {
-		log.Default().Fatal("invalid logger")
+		log.Default().Fatal("invalid Session 3")
 		return
 	}
 
@@ -41,7 +41,7 @@ func onSentenceBegin(text string, param interface{}) {
 func onSentenceEnd(text string, param interface{}) {
 	sess, ok := param.(*Session)
 	if !ok {
-		log.Default().Fatal("invalid logger")
+		log.Default().Fatal("invalid Session 4")
 		return
 	}
 
@@ -52,7 +52,7 @@ func onSentenceEnd(text string, param interface{}) {
 func onResultChanged(text string, param interface{}) {
 	sess, ok := param.(*Session)
 	if !ok {
-		log.Default().Fatal("invalid logger")
+		log.Default().Fatal("invalid Session 5")
 		return
 	}
 
@@ -63,7 +63,7 @@ func onResultChanged(text string, param interface{}) {
 func onCompleted(text string, param interface{}) {
 	sess, ok := param.(*Session)
 	if !ok {
-		log.Default().Fatal("invalid logger")
+		log.Default().Fatal("invalid Session 6")
 		return
 	}
 
@@ -74,7 +74,7 @@ func onCompleted(text string, param interface{}) {
 func onClose(param interface{}) {
 	sess, ok := param.(*Session)
 	if !ok {
-		log.Default().Fatal("invalid logger")
+		log.Default().Fatal("invalid Session close")
 		return
 	}
 

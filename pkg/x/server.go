@@ -141,11 +141,11 @@ func (s *Server) udpServerStart() (err error) {
 
 	buf := make([]byte, 2048)
 	for {
-		dataLen, cAddr, err := s.udpConn.ReadFromUDP(buf)
+		dataLen, _, err := s.udpConn.ReadFromUDP(buf)
 		if err != nil {
 			return err
 		}
-		fmt.Println("cAddr :=", cAddr.String())
+		//fmt.Println("cAddr :=", cAddr.String())
 
 		if dataLen > 16 {
 			sID := binary.BigEndian.Uint32(buf[0:4])

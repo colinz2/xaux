@@ -55,7 +55,7 @@ func (s *SessionMaker) MakeSession(r x.IResponse) (x.ISession, error) {
 	sess.st, err = nls.NewSpeechTranscription(config, nil,
 		onTaskFailed, onStarted,
 		onSentenceBegin, onSentenceEnd, onResultChanged,
-		onCompleted, onClose, s)
+		onCompleted, onClose, &sess)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,6 @@ func (s *Session) CommandCb(allRequest *x.AllRequest) error {
 	return nil
 }
 func (s *Session) DataCb(data []byte, seq uint32) error {
-	fmt.Println("get seq=", seq, ", data len=", len(data))
 	var buf16k []byte
 	var err error
 	if resample.R48kTO16k != nil {
@@ -176,7 +175,6 @@ func (s *Session) DataCb(data []byte, seq uint32) error {
 	} else {
 		panic("resample not support")
 	}
-	fmt.Println("get seq=", seq, ", buf16k len=", len(buf16k))
 
 	err = s.st.SendAudioData(buf16k)
 	if err != nil {
