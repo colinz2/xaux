@@ -5,24 +5,36 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/realzhangm/xaux/pkg/doa"
 	"net"
 	"sync"
 	"sync/atomic"
 )
 
 import (
+	"github.com/realzhangm/xaux/pkg/doa"
 	"golang.org/x/sync/errgroup"
 )
 
 type ISessionMaker interface {
-	MakeSession() (ISession, error)
+	MakeSession(IResponse) (ISession, error)
 }
 
 type ISession interface {
 	ID() uint32
-	CommandCb(con net.Conn, allResponse *AllRequest) error
+	CommandCb(allResponse *AllRequest) error
 	DataCb(data []byte, seq uint32) error
+}
+
+type IResponse interface {
+	Write([]byte) (int, error)
+}
+
+type TCPResponse struct {
+	Conn net.Conn
+}
+
+func (t *TCPResponse) Write(data []byte) (int, error) {
+	return t.Conn.Write(data)
 }
 
 type Conf struct {
@@ -75,7 +87,7 @@ func NewServer(conf Conf, opts ...Option) *Server {
 }
 
 func (s *Server) processTcp(conn net.Conn) {
-	sess, err := s.sessionMaker.MakeSession()
+	sess, err := s.sessionMaker.MakeSession(&TCPResponse{Conn: conn})
 	if err != nil {
 		conn.Close()
 		return
@@ -89,13 +101,13 @@ func (s *Server) processTcp(conn net.Conn) {
 
 	reader := json.NewDecoder(conn)
 	for {
-		allRsp := AllRequest{}
-		err := reader.Decode(&allRsp)
+		allReq := AllRequest{}
+		err := reader.Decode(&allReq)
 		if err != nil {
 			doa.PanicExceptIOEOF(err)
 			return
 		}
-		err = sess.CommandCb(conn, &allRsp)
+		err = sess.CommandCb(&allReq)
 		if err != nil {
 			return
 		}
@@ -168,7 +180,6 @@ func (s *Server) Start() error {
 
 func (s *Server) Close() {
 	if s.udpConn != nil {
-
 		s.udpConn.Close()
 	}
 

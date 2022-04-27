@@ -1,20 +1,18 @@
 package main
 
 import (
-	"github.com/realzhangm/xaux/pkg/x"
+	"github.com/realzhangm/xaux/pkg/ai_proxy"
 )
 
 func init() {
-
 }
 
 func main() {
-	conf := x.Conf{
-		TcpPort: x.TCPPort,
-		UdpPort: x.UDPPort,
+	proxy, err := ai_proxy.NewProxy()
+	if err != nil {
+		panic(err)
 	}
-	server := x.NewServer(conf)
-	err := server.Start()
+	err = proxy.Start()
 	if err != nil {
 		panic(err)
 	}

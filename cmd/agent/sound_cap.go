@@ -23,6 +23,11 @@ func toString(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
+func (s *SoundCap) rspCallBack(rsp *x.AllResponse) error {
+	fmt.Println("rsp=", rsp)
+	return nil
+}
+
 func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 	sc := &SoundCap{
 		buff:          &bytes.Buffer{},
@@ -39,7 +44,7 @@ func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 	err = sc.asrClient.Start(x.StartConfig{
 		SampleRate:    int32(sc.sampleRate),
 		BitsPerSample: int32(sc.bitsPerSample),
-	})
+	}, sc.rspCallBack)
 	if err != nil {
 		return nil, err
 	}

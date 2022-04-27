@@ -1,2 +1,2 @@
 resample:
-	go build -buildmode=plugin ./pkg/resample/lib
+	go build -o resample.so -buildmode=plugin ./pkg/resample/lib

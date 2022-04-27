@@ -2,6 +2,7 @@ package resample
 
 import (
 	"plugin"
+	"runtime"
 )
 
 var (
@@ -9,6 +10,18 @@ var (
 )
 
 func init() {
+	var goaway = false
+	switch runtime.GOOS {
+	case "linux", "darwin":
+		goaway = false
+	default:
+		goaway = true
+	}
+
+	if goaway {
+		return
+	}
+
 	p, err := plugin.Open("resample.so")
 	if err != nil {
 		panic(err)

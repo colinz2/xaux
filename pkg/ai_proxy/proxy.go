@@ -1,7 +1,7 @@
 package ai_proxy
 
 import (
-	"github.com/realzhangm/xaux/pkg/ai_proxy/asr"
+	"github.com/realzhangm/xaux/pkg/ai_proxy/asr/aliyun"
 	"github.com/realzhangm/xaux/pkg/x"
 )
 
@@ -16,8 +16,11 @@ func NewProxy() (*Proxy, error) {
 		TcpPort: x.TCPPort,
 		UdpPort: x.UDPPort,
 	}
-	asrSessionMaker := asr.NewSessionMaker()
+	asrSessionMaker := aliyun.NewSessionMaker()
 	proxy.xServer = x.NewServer(conf, x.WithOptionSessionMaker(asrSessionMaker))
-
 	return &proxy, nil
+}
+
+func (p *Proxy) Start() error {
+	return p.xServer.Start()
 }

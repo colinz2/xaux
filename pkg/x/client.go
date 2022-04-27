@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/realzhangm/xaux/pkg/doa"
 	"net"
 	"time"
 )
@@ -21,15 +22,17 @@ var (
 )
 
 type Client struct {
-	status    int32
-	tcpConn   net.Conn
-	udpConn   *net.UDPConn
-	sessionID uint32
-	udpPort   int32
-	seq       uint32
-	agentIP   string
-	endMsg    string
-	buffer    bytes.Buffer
+	status     int32
+	tcpConn    net.Conn
+	udpConn    *net.UDPConn
+	sessionID  uint32
+	udpPort    int32
+	seq        uint32
+	agentIP    string
+	endMsg     string
+	buffer     bytes.Buffer
+	rspChan    chan *AllResponse
+	endRspChan chan *AllResponse
 }
 
 // TODO 处理返回结果
@@ -46,10 +49,12 @@ func NewClient(agentAddr string) (*Client, error) {
 	}
 
 	client := &Client{
-		status:  StatusInit,
-		tcpConn: conn,
-		agentIP: addr.IP.String(),
-		seq:     1,
+		status:     StatusInit,
+		tcpConn:    conn,
+		agentIP:    addr.IP.String(),
+		seq:        1,
+		rspChan:    make(chan *AllResponse, 1),
+		endRspChan: make(chan *AllResponse, 1),
 	}
 	return client, nil
 }
@@ -64,7 +69,26 @@ func (c *Client) Close() {
 	}
 }
 
-func (c *Client) Start(conf StartConfig) error {
+func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
+	reader := json.NewDecoder(c.tcpConn)
+	for {
+		allRsp := AllResponse{}
+		err := reader.Decode(&allRsp)
+		if err != nil {
+			doa.PanicExceptIOEOF(err)
+			return
+		}
+		switch allRsp.Cmd {
+		case CmdStart:
+		case CmdEnd:
+			c.endRspChan <- &allRsp
+		default:
+			cb(&allRsp)
+		}
+	}
+}
+
+func (c *Client) Start(conf StartConfig, cb func(rsp *AllResponse) error) error {
 	start := Start{
 		Cmd:    CmdStart,
 		Config: conf,
@@ -93,6 +117,7 @@ func (c *Client) Start(conf StartConfig) error {
 	c.udpPort = startRsp.UDPPort
 	c.status = StatusStart
 	c.tcpConn.SetReadDeadline(time.Time{})
+	go c.goToLoopResponse(cb)
 	return nil
 }
 
@@ -109,20 +134,17 @@ func (c *Client) End() error {
 		return err
 	}
 
-	endRsp := EndResponse{}
-	c.tcpConn.SetReadDeadline(time.Now().Add(time.Second * 10))
-	jDecoder := json.NewDecoder(c.tcpConn)
-	err = jDecoder.Decode(&endRsp)
-	if err != nil {
-		return err
-	}
-	if endRsp.Cmd != CmdEnd {
-		return ErrNotEnd
+	// TODO timeout
+	var allRsp *AllResponse
+	select {
+	case allRsp = <-c.endRspChan:
 	}
 
+	if allRsp.Cmd != CmdEnd {
+		return ErrNotEnd
+	}
 	c.status = StatusEnd
-	c.endMsg = endRsp.Msg
-	c.tcpConn.SetReadDeadline(time.Time{})
+	c.endMsg = allRsp.Msg
 	return nil
 }
 

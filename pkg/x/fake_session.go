@@ -3,7 +3,6 @@ package x
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 )
 
 var _ ISessionMaker = (*FakeSessionMaker)(nil)
@@ -14,24 +13,24 @@ type FakeSessionMaker struct {
 }
 
 type FakeSession struct {
-	id uint32
+	id          uint32
+	netResponse IResponse
 }
 
 func NewFakeSessionMaker() *FakeSessionMaker {
 	return &FakeSessionMaker{}
 }
 
-func (f *FakeSessionMaker) MakeSession() (ISession, error) {
+func (f *FakeSessionMaker) MakeSession(response IResponse) (ISession, error) {
 	f.cnt++
-	return &FakeSession{id: f.cnt}, nil
+	return &FakeSession{id: f.cnt, netResponse: response}, nil
 }
 
 func (f *FakeSession) ID() uint32 {
 	return f.id
 }
 
-func (f *FakeSession) CommandCb(conn net.Conn, allResponse *AllRequest) error {
-	fmt.Println("client addr =", conn.RemoteAddr().String(), ":")
+func (f *FakeSession) CommandCb(allResponse *AllRequest) error {
 	buf, _ := json.MarshalIndent(allResponse, "", " ")
 	fmt.Println(string(buf))
 
@@ -51,7 +50,7 @@ func (f *FakeSession) CommandCb(conn net.Conn, allResponse *AllRequest) error {
 		}
 		rspBuf, _ = json.Marshal(&endRsp)
 	}
-	_, err := conn.Write(rspBuf)
+	_, err := f.netResponse.Write(rspBuf)
 	if err != nil {
 		panic(err)
 	}
