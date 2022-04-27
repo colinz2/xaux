@@ -1,7 +1,12 @@
-all: resample agent
+all: resample proxy
 
 resample:
 	go build -o resample.so -buildmode=plugin ./pkg/resample/lib
 
-agent:
-	go build -o agent ./cmd/proxy
+proxy:
+	go build -o proxy ./cmd/proxy
+
+clean:
+	rm -rf resample.so proxy
+
+.PHONY: clean

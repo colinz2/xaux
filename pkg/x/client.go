@@ -86,6 +86,7 @@ func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
 			cb(&allRsp)
 		}
 	}
+	c.status = StatusInit
 }
 
 func (c *Client) Start(conf StartConfig, cb func(rsp *AllResponse) error) error {
