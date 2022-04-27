@@ -96,6 +96,8 @@ func waitReady(ch chan bool) error {
 func (s *Session) onStart() error {
 	param := nls.DefaultSpeechTranscriptionParam()
 	exMap := make(map[string]interface{})
+	exMap["disfluency"] = true
+	exMap["enable_words"] = true
 	ready, err := s.st.Start(param, exMap)
 	if err != nil {
 		s.st.Shutdown()
