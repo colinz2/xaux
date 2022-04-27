@@ -1,2 +1,0 @@
-resample:
-	go ./pkg/resample -buildmode=plugin

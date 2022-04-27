@@ -1,4 +1,4 @@
-package resample
+package main
 
 import (
 	"bytes"
