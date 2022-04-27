@@ -1,4 +1,4 @@
-package client
+package x
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"time"
-	"xaux/pkg/x"
 )
 
 const (
@@ -47,7 +46,7 @@ func NewClient(agentAddr string) (*Client, error) {
 	}
 
 	client := &Client{
-		status:  x.StatusInit,
+		status:  StatusInit,
 		tcpConn: conn,
 		agentIP: addr.IP.String(),
 		seq:     1,
@@ -65,9 +64,9 @@ func (c *Client) Close() {
 	}
 }
 
-func (c *Client) Start(conf x.StartConfig) error {
-	start := x.Start{
-		Cmd:    x.CmdStart,
+func (c *Client) Start(conf StartConfig) error {
+	start := Start{
+		Cmd:    CmdStart,
 		Config: conf,
 	}
 	buf, err := json.Marshal(&start)
@@ -79,27 +78,27 @@ func (c *Client) Start(conf x.StartConfig) error {
 		return err
 	}
 
-	startRsp := x.StartResponse{}
+	startRsp := StartResponse{}
 	c.tcpConn.SetReadDeadline(time.Now().Add(time.Second * 10))
 	jDecoder := json.NewDecoder(c.tcpConn)
 	err = jDecoder.Decode(&startRsp)
 	if err != nil {
 		return err
 	}
-	if startRsp.Cmd != x.CmdStart {
+	if startRsp.Cmd != CmdStart {
 		return ErrNotStart
 	}
 
 	c.sessionID = startRsp.SessionID
 	c.udpPort = startRsp.UDPPort
-	c.status = x.StatusStart
+	c.status = StatusStart
 	c.tcpConn.SetReadDeadline(time.Time{})
 	return nil
 }
 
 func (c *Client) End() error {
-	end := x.End{
-		Cmd: x.CmdEnd,
+	end := End{
+		Cmd: CmdEnd,
 	}
 	buf, err := json.Marshal(&end)
 	if err != nil {
@@ -110,25 +109,25 @@ func (c *Client) End() error {
 		return err
 	}
 
-	endRsp := x.EndResponse{}
+	endRsp := EndResponse{}
 	c.tcpConn.SetReadDeadline(time.Now().Add(time.Second * 10))
 	jDecoder := json.NewDecoder(c.tcpConn)
 	err = jDecoder.Decode(&endRsp)
 	if err != nil {
 		return err
 	}
-	if endRsp.Cmd != x.CmdEnd {
+	if endRsp.Cmd != CmdEnd {
 		return ErrNotEnd
 	}
 
-	c.status = x.StatusEnd
+	c.status = StatusEnd
 	c.endMsg = endRsp.Msg
 	c.tcpConn.SetReadDeadline(time.Time{})
 	return nil
 }
 
 func (c *Client) Send(data []byte) (err error) {
-	if c.status != x.StatusStart {
+	if c.status != StatusStart {
 		return ErrNotStart
 	}
 

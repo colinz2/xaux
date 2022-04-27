@@ -1,15 +1,14 @@
-package server
+package x
 
 import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/realzhangm/xaux/pkg/doa"
 	"net"
 	"sync"
 	"sync/atomic"
-	"xaux/pkg/doa"
-	"xaux/pkg/x"
 )
 
 import (
@@ -22,7 +21,7 @@ type ISessionMaker interface {
 
 type ISession interface {
 	ID() uint32
-	CommandCb(con net.Conn, allResponse *x.AllRequest) error
+	CommandCb(con net.Conn, allResponse *AllRequest) error
 	DataCb(data []byte, seq uint32) error
 }
 
@@ -60,11 +59,11 @@ func NewServer(conf Conf, opts ...Option) *Server {
 	}
 
 	if server.TcpPort == 0 {
-		server.TcpPort = x.TCPPort
+		server.TcpPort = TCPPort
 	}
 
 	if server.UdpPort == 0 {
-		server.UdpPort = x.UDPPort
+		server.UdpPort = UDPPort
 	}
 
 	if server.sessionMaker == nil {
@@ -90,7 +89,7 @@ func (s *Server) processTcp(conn net.Conn) {
 
 	reader := json.NewDecoder(conn)
 	for {
-		allRsp := x.AllRequest{}
+		allRsp := AllRequest{}
 		err := reader.Decode(&allRsp)
 		if err != nil {
 			doa.PanicExceptIOEOF(err)

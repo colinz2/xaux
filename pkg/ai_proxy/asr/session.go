@@ -1,37 +1,37 @@
-package server
+package asr
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/realzhangm/xaux/pkg/x"
 	"net"
-	"xaux/pkg/x"
 )
 
-var _ ISessionMaker = (*FakeSessionMaker)(nil)
-var _ ISession = (*FakeSession)(nil)
+var _ x.ISession = (*Session)(nil)
+var _ x.ISessionMaker = (*SessionMaker)(nil)
 
-type FakeSessionMaker struct {
+type SessionMaker struct {
 	cnt uint32
 }
 
-type FakeSession struct {
+func NewSessionMaker() *SessionMaker {
+	return &SessionMaker{}
+}
+
+func (s *SessionMaker) MakeSession() (x.ISession, error) {
+	s.cnt++
+	return &Session{id: s.cnt}, nil
+}
+
+type Session struct {
 	id uint32
 }
 
-func NewFakeSessionMaker() *FakeSessionMaker {
-	return &FakeSessionMaker{}
-}
-
-func (f *FakeSessionMaker) MakeSession() (ISession, error) {
-	f.cnt++
-	return &FakeSession{id: f.cnt}, nil
-}
-
-func (f *FakeSession) ID() uint32 {
+func (f *Session) ID() uint32 {
 	return f.id
 }
 
-func (f *FakeSession) CommandCb(conn net.Conn, allResponse *x.AllRequest) error {
+func (f *Session) CommandCb(conn net.Conn, allResponse *x.AllRequest) error {
 	fmt.Println("client addr =", conn.RemoteAddr().String(), ":")
 	buf, _ := json.MarshalIndent(allResponse, "", " ")
 	fmt.Println(string(buf))
@@ -58,7 +58,7 @@ func (f *FakeSession) CommandCb(conn net.Conn, allResponse *x.AllRequest) error 
 	}
 	return nil
 }
-func (f *FakeSession) DataCb(data []byte, seq uint32) error {
+func (f *Session) DataCb(data []byte, seq uint32) error {
 	fmt.Println("get seq=", seq, ", data len=", len(data))
 	return nil
 }

@@ -1,8 +1,7 @@
 package main
 
 import (
-	"xaux/pkg/x"
-	"xaux/pkg/x/server"
+	"github.com/realzhangm/xaux/pkg/x"
 )
 
 func init() {
@@ -10,11 +9,11 @@ func init() {
 }
 
 func main() {
-	conf := server.Conf{
+	conf := x.Conf{
 		TcpPort: x.TCPPort,
 		UdpPort: x.UDPPort,
 	}
-	server := server.NewServer(conf)
+	server := x.NewServer(conf)
 	err := server.Start()
 	if err != nil {
 		panic(err)

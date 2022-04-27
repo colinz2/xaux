@@ -71,8 +71,8 @@ response
 ```json
 {
   "cmd": "recognize",
+  "interim": false,
   "result": {
-    
   }
 }
 ```

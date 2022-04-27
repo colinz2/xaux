@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/realzhangm/xaux/pkg/doa"
+	"github.com/realzhangm/xaux/pkg/x"
 	"os"
 	"os/exec"
-	"xaux/pkg/doa"
-	"xaux/pkg/x"
-	"xaux/pkg/x/client"
 )
 
 type SoundCap struct {
@@ -17,7 +16,7 @@ type SoundCap struct {
 	channelNum    int
 	sampleRate    int
 	bitsPerSample int
-	asrClient     *client.Client
+	asrClient     *x.Client
 }
 
 func toString(n int) string {
@@ -33,7 +32,7 @@ func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 	}
 
 	var err error = nil
-	sc.asrClient, err = client.NewClient(proxyAddr)
+	sc.asrClient, err = x.NewClient(proxyAddr)
 	if err != nil {
 		return nil, err
 	}
