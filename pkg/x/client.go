@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/realzhangm/xaux/pkg/doa"
 	"net"
 	"time"
 )
@@ -75,9 +74,9 @@ func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
 		allRsp := AllResponse{}
 		err := reader.Decode(&allRsp)
 		if err != nil {
-			doa.PanicExceptIOEOF(err)
 			return
 		}
+		fmt.Println("allRsp : ", allRsp.Cmd)
 		switch allRsp.Cmd {
 		case CmdStart:
 		case CmdEnd:

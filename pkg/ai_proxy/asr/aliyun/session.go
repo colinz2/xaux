@@ -99,6 +99,7 @@ func (s *Session) onStart() error {
 	exMap := make(map[string]interface{})
 	exMap["disfluency"] = true
 	exMap["enable_words"] = true
+	exMap["enable_semantic_sentence_detection"] = true
 	ready, err := s.st.Start(param, exMap)
 	if err != nil {
 		s.st.Shutdown()

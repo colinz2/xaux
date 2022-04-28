@@ -42,7 +42,19 @@ type EndResponse struct {
 	Msg   string `json:"msg"`
 }
 
+type Words struct {
+	Text      string `json:"text"`
+	Starttime int    `json:"startTime"`
+	Endtime   int    `json:"endTime"`
+}
+
 type RecognizeResult struct {
+	Interim    bool    `json:"interim"`
+	Index      int     `json:"index"`
+	Time       int     `json:"time"`
+	Result     string  `json:"result"`
+	Confidence float64 `json:"confidence"`
+	Words      []Words `json:"words,omitempty"`
 }
 
 type RecognizeResponse struct {
