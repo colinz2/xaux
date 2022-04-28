@@ -32,7 +32,7 @@ func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 	sc := &SoundCap{
 		buff:          &bytes.Buffer{},
 		channelNum:    1,
-		sampleRate:    48000,
+		sampleRate:    16000,
 		bitsPerSample: 16,
 	}
 
@@ -56,7 +56,8 @@ func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 		"--record", "-o", "@stdout.wav",
 		"--format=int16",
 		"--channels=mono",
-		"--rate=16000")
+		fmt.Sprintf("--rate=%d", sc.sampleRate),
+	)
 
 	doa.MustTrue(sc.cmd != nil, "sc.cmd is nil")
 

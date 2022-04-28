@@ -90,6 +90,7 @@ func (s *Server) processTcp(conn net.Conn) {
 	sess, err := s.sessionMaker.MakeSession(&TCPResponse{Conn: conn})
 	if err != nil {
 		conn.Close()
+		fmt.Println("MakeSession err :", err)
 		return
 	}
 	atomic.AddInt64(&s.sessionCnt, 1)

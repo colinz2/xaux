@@ -181,6 +181,10 @@ func (s *Session) DataCb(data []byte, seq uint32) error {
 		} else {
 			panic("resample not support")
 		}
+	} else if s.startConfig.SampleRate == 16000 {
+		buf16k = data[0:]
+	} else {
+		panic(fmt.Sprintf("not support SampleRate, %d", s.startConfig.SampleRate))
 	}
 
 	err = s.st.SendAudioData(buf16k)
