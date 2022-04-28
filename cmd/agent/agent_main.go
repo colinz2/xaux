@@ -24,7 +24,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	go sc.Run()
+	go func() {
+		err = sc.Run()
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGILL, syscall.SIGINT, syscall.SIGQUIT)

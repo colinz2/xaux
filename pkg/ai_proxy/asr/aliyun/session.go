@@ -65,9 +65,10 @@ func (s *SessionMaker) MakeSession(r x.IResponse) (x.ISession, error) {
 }
 
 type Session struct {
-	id     uint32
-	netRsp *x.TCPResponse
-	st     *nls.SpeechTranscription
+	id          uint32
+	netRsp      *x.TCPResponse
+	st          *nls.SpeechTranscription
+	startConfig x.StartConfig
 }
 
 func (s *Session) ID() uint32 {
@@ -145,6 +146,7 @@ func (s *Session) CommandCb(allRequest *x.AllRequest) error {
 				UDPPort:   x.UDPPort,
 			}
 		}
+		s.startConfig = allRequest.Config
 		rspBuf, _ = json.Marshal(&startRsp)
 	case x.CmdEnd:
 		var endRsp x.EndResponse
@@ -172,10 +174,13 @@ func (s *Session) CommandCb(allRequest *x.AllRequest) error {
 func (s *Session) DataCb(data []byte, seq uint32) error {
 	var buf16k []byte
 	var err error
-	if resample.R48kTO16k != nil {
-		buf16k, err = resample.R48kTO16k(data)
-	} else {
-		panic("resample not support")
+
+	if s.startConfig.SampleRate == 48000 {
+		if resample.R48kTO16k != nil {
+			buf16k, err = resample.R48kTO16k(data)
+		} else {
+			panic("resample not support")
+		}
 	}
 
 	err = s.st.SendAudioData(buf16k)

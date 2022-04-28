@@ -31,7 +31,7 @@ func (s *SoundCap) rspCallBack(rsp *x.AllResponse) error {
 func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 	sc := &SoundCap{
 		buff:          &bytes.Buffer{},
-		channelNum:    2,
+		channelNum:    1,
 		sampleRate:    48000,
 		bitsPerSample: 16,
 	}
@@ -49,8 +49,15 @@ func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 		return nil, err
 	}
 
-	sc.cmd = exec.CommandContext(ctx, "winscap.exe",
-		toString(sc.channelNum), toString(sc.sampleRate), toString(sc.bitsPerSample))
+	//sc.cmd = exec.CommandContext(ctx, "winscap.exe",
+	//	toString(sc.channelNum), toString(sc.sampleRate), toString(sc.bitsPerSample))
+	sc.cmd = exec.CommandContext(ctx, "fmedia",
+		"--dev-loopback=1",
+		"--record", "-o", "@stdout.wav",
+		"--format=int16",
+		"--channels=mono",
+		"--rate=16000")
+
 	doa.MustTrue(sc.cmd != nil, "sc.cmd is nil")
 
 	sc.cmd.Stdout = sc
@@ -68,14 +75,25 @@ func (s SoundCap) getMillisecond(len int) int {
 func (s *SoundCap) Write(p []byte) (n int, err error) {
 	dataLen := len(p)
 	doa.MustTrue(dataLen%2 == 0, "sample not even")
-	//fmt.Println("duration=", s.getMillisecond(dataLen))
-	for i := 0; i < dataLen; i += 4 {
-		monoData := p[i : i+2]
-		_, err := s.buff.Write(monoData)
+	fmt.Println("duration=", s.getMillisecond(dataLen))
+	if s.channelNum == 2 {
+		for i := 0; i < dataLen; i += 4 {
+			monoData := p[i : i+2]
+			_, err := s.buff.Write(monoData)
+			if err != nil {
+				panic(err)
+			}
+			err = s.asrClient.Send(monoData)
+			if err != nil {
+				panic(err)
+			}
+		}
+	} else {
+		_, err := s.buff.Write(p)
 		if err != nil {
 			panic(err)
 		}
-		err = s.asrClient.Send(monoData)
+		err = s.asrClient.Send(p)
 		if err != nil {
 			panic(err)
 		}
