@@ -24,7 +24,7 @@ func toString(n int) string {
 }
 
 func (s *SoundCap) rspCallBack(rsp *x.AllResponse) error {
-	fmt.Println("rsp=", rsp)
+	fmt.Println(rsp.Result.Result)
 	return nil
 }
 
@@ -76,7 +76,7 @@ func (s SoundCap) getMillisecond(len int) int {
 func (s *SoundCap) Write(p []byte) (n int, err error) {
 	dataLen := len(p)
 	doa.MustTrue(dataLen%2 == 0, "sample not even")
-	fmt.Println("duration=", s.getMillisecond(dataLen))
+	//fmt.Println("duration=", s.getMillisecond(dataLen))
 	if s.channelNum == 2 {
 		for i := 0; i < dataLen; i += 4 {
 			monoData := p[i : i+2]

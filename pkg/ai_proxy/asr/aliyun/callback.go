@@ -72,6 +72,20 @@ func onResultChanged(text string, param interface{}) {
 
 	fmt.Println("sessID:", sess.ID(), ", onResultChanged")
 	fmt.Println("text:", text)
+
+	rst := Result{}
+	err := json.Unmarshal([]byte(text), &rst)
+	if err != nil {
+		panic(err)
+		return
+	}
+	recognizeResponse := rst.convertToRecognizeResponse(true)
+	buff, err := json.Marshal(&recognizeResponse)
+	if err != nil {
+		panic(err)
+		return
+	}
+	sess.netRsp.Write(buff)
 }
 
 func onCompleted(text string, param interface{}) {

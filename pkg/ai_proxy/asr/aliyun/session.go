@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	nls "github.com/aliyun/alibabacloud-nls-go-sdk"
 	"os"
 	"time"
 )
 
 import (
-	"github.com/aliyun/alibabacloud-nls-go-sdk"
 	"github.com/realzhangm/xaux/pkg/resample"
 	"github.com/realzhangm/xaux/pkg/x"
 )
@@ -96,6 +96,7 @@ func waitReady(ch chan bool) error {
 
 func (s *Session) onStart() error {
 	param := nls.DefaultSpeechTranscriptionParam()
+	param.Format = "wav"
 	exMap := make(map[string]interface{})
 	exMap["disfluency"] = true
 	exMap["enable_words"] = true
