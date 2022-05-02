@@ -103,14 +103,13 @@ func (s *Server) processTcp(conn net.Conn) {
 	reader := json.NewDecoder(conn)
 	for {
 		allReq := AllRequest{}
-		err := reader.Decode(&allReq)
+		err = reader.Decode(&allReq)
 		if err != nil {
-			doa.PanicExceptIOEOF(err)
-			return
+			break
 		}
 		err = sess.CommandCb(&allReq)
 		if err != nil {
-			return
+			break
 		}
 	}
 }

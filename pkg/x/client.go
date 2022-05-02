@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	UDPSendLen = 1200
+	UDPSendLen = 1300
 )
 
 var (

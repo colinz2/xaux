@@ -6,6 +6,7 @@ require (
 	github.com/aliyun/alibabacloud-nls-go-sdk v0.0.1
 	github.com/zaf/resample v0.0.0-20220109201959-aca35f45e6fa
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	golang.org/x/sys v0.0.0-20220502124256-b6088ccd6cba
 )
 
 require (

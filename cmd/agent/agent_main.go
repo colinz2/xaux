@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/realzhangm/xaux/pkg/ffaudio"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +15,14 @@ var (
 )
 
 func init() {
+	ffaudio.Init()
+	devCap, err := ffaudio.ListDevCapture()
+	if err != nil {
+		panic(err)
+	}
+	for _, d := range devCap {
+		fmt.Printf("%+v \n", d)
+	}
 	flag.Parse()
 }
 

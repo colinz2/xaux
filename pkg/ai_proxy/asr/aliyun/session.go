@@ -23,6 +23,10 @@ var (
 	APPKEY = "xxxx"
 )
 
+var (
+	WsUrlBeijing = "wss://nls-gateway-cn-beijing.aliyuncs.com/ws/v1"
+)
+
 type SessionMaker struct {
 	cnt uint32
 }
@@ -47,7 +51,7 @@ func (s *SessionMaker) MakeSession(r x.IResponse) (x.ISession, error) {
 	var err error
 	sess := Session{id: s.cnt, netRsp: r.(*x.TCPResponse)}
 
-	config, err := nls.NewConnectionConfigWithAKInfoDefault(nls.DEFAULT_URL, APPKEY, AKID, AKKEY)
+	config, err := nls.NewConnectionConfigWithAKInfoDefault(WsUrlBeijing, APPKEY, AKID, AKKEY)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +104,7 @@ func (s *Session) onStart() error {
 	exMap := make(map[string]interface{})
 	exMap["disfluency"] = true
 	exMap["enable_words"] = true
-	exMap["enable_semantic_sentence_detection"] = true
+	exMap["enable_semantic_sentence_detection"] = false
 	ready, err := s.st.Start(param, exMap)
 	if err != nil {
 		s.st.Shutdown()

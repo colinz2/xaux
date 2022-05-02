@@ -56,6 +56,7 @@ func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 		"--record", "-o", "@stdout.wav",
 		"--format=int16",
 		"--channels=mono",
+		"--capture-buffer=64",
 		fmt.Sprintf("--rate=%d", sc.sampleRate),
 	)
 
