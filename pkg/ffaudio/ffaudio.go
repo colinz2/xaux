@@ -62,20 +62,18 @@ import (
 	"unsafe"
 )
 
+const (
+	DevTypeLoopBack = "loopback"
+	DevTypeCapture  = "capture"
+)
+
 type DevInfo struct {
 	Name       string
-	IndexStr   string
+	DevIDStr   string
 	IsDefault  bool
 	Format     int
 	SampleRate int
 	Channels   int
-}
-
-type DevPlaybackAndCapture struct {
-	PlayBackDefault     string
-	CaptureDefault      string
-	PlayBackDevNameList []string
-	CaptureDevNameList  []string
 }
 
 var (
@@ -98,6 +96,28 @@ func ListDevPlayback() ([]DevInfo, error) {
 
 func ListDevCapture() ([]DevInfo, error) {
 	return ListDev(C.FFAUDIO_DEV_CAPTURE)
+}
+
+type DevPlaybackAndCapture struct {
+	PlayBackDefault     string
+	CaptureDefault      string
+	PlayBackDevNameList []string
+	CaptureDevNameList  []string
+}
+
+// FindIndex @return : index, type
+func (d *DevPlaybackAndCapture) FindIndex(devName string) (int, string) {
+	for i := range d.CaptureDevNameList {
+		if devName == d.CaptureDevNameList[i] {
+			return i, DevTypeCapture
+		}
+	}
+	for i := range d.PlayBackDevNameList {
+		if devName == d.PlayBackDevNameList[i] {
+			return i, DevTypeLoopBack
+		}
+	}
+	return -1, ""
 }
 
 func GetDevPlaybackAndCapture() (*DevPlaybackAndCapture, error) {
@@ -150,7 +170,7 @@ func ListDev(mode C.ffuint) ([]DevInfo, error) {
 			var errStr string = C.GoString(C.dev_error(d))
 			return nil, fmt.Errorf("%w,%s", ErrFFAudioDev, errStr)
 		}
-		indexStr := DevInfoFormat(unsafe.Pointer(C.dev_info_DEV_ID(d)))
+		devIDWStr := DevInfoFormat(unsafe.Pointer(C.dev_info_DEV_ID(d)))
 		isDefault := false
 		if C.dev_info(d, C.FFAUDIO_DEV_IS_DEFAULT) != nil {
 			isDefault = true
@@ -158,7 +178,7 @@ func ListDev(mode C.ffuint) ([]DevInfo, error) {
 
 		dev := DevInfo{
 			Name:       C.GoString(C.dev_info(d, C.FFAUDIO_DEV_NAME)),
-			IndexStr:   indexStr,
+			DevIDStr:   devIDWStr,
 			Format:     int(C.dev_info_MIX_FORMAT_0(d)),
 			SampleRate: int(C.dev_info_MIX_FORMAT_1(d)),
 			Channels:   int(C.dev_info_MIX_FORMAT_2(d)),

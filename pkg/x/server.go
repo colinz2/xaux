@@ -5,13 +5,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/realzhangm/xaux/pkg/common/doa"
 	"net"
 	"sync"
 	"sync/atomic"
 )
 
 import (
-	"github.com/realzhangm/xaux/pkg/doa"
 	"golang.org/x/sync/errgroup"
 )
 

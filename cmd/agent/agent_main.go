@@ -4,32 +4,46 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/realzhangm/xaux/pkg/ffaudio"
+	"github.com/realzhangm/xaux/pkg/x"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
+import (
+	"github.com/realzhangm/xaux/pkg/ffaudio"
+	"github.com/realzhangm/xaux/pkg/sound_cap"
+)
+
 var (
-	proxyAddr = flag.String("aa", "127.0.0.1:11024", "asr ai_proxy address")
+	proxyAddr   = flag.String("aa", "127.0.0.1:11024", "asr ai_proxy address")
+	exeDevParam = ""
 )
 
 func init() {
+	flag.Parse()
 	ffaudio.Init()
-	devCap, err := ffaudio.ListDevCapture()
+	devCap, err := ffaudio.GetDevPlaybackAndCapture()
 	if err != nil {
 		panic(err)
 	}
-	for _, d := range devCap {
-		fmt.Printf("%+v \n", d)
+	index, devType := devCap.FindIndex(devCap.PlayBackDefault)
+	if index < 0 {
+		panic("index < 0")
 	}
-	flag.Parse()
+	exeDevParam = sound_cap.TransFFMediaDevParam(devType, index)
 }
 
 func main() {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
-	sc, err := NewSoundCap(ctx, *proxyAddr)
+	sc, err := sound_cap.NewSoundCap(ctx, &sound_cap.Config{
+		ProxyAddr:      *proxyAddr,
+		ExeDevParam:    exeDevParam,
+		RecordFilePath: "",
+	}, func(rsp *x.AllResponse) error {
+		return nil
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -47,6 +61,6 @@ func main() {
 
 	cancel()
 	fmt.Println("signal = ", sig)
-	sc.Release()
-	sc.Dump("xx.pcm")
+	sc.Close()
+	sc.DumpRecordAudio()
 }

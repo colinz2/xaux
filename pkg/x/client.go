@@ -82,7 +82,9 @@ func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
 		case CmdEnd:
 			c.endRspChan <- &allRsp
 		default:
-			cb(&allRsp)
+			if cb != nil {
+				cb(&allRsp)
+			}
 		}
 	}
 	c.status = StatusInit

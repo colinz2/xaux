@@ -1,50 +1,62 @@
-package main
+package sound_cap
 
 import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/realzhangm/xaux/pkg/doa"
+	"github.com/realzhangm/xaux/pkg/common/doa"
+	"github.com/realzhangm/xaux/pkg/common/path"
 	"github.com/realzhangm/xaux/pkg/x"
 	"os"
 	"os/exec"
+	"sync/atomic"
 )
 
+type AsrResultCallBack func(rsp *x.AllResponse) error
+
 type SoundCap struct {
-	buff          *bytes.Buffer
+	asrClient     *x.Client
 	cmd           *exec.Cmd
+	buff          *bytes.Buffer
 	channelNum    int
 	sampleRate    int
 	bitsPerSample int
-	asrClient     *x.Client
+	isClosed      int32
+	Config
 }
 
-func toString(n int) string {
-	return fmt.Sprintf("%d", n)
+type Config struct {
+	ProxyAddr      string
+	ExeDevParam    string // --dev-loopback=1
+	RecordFilePath string
 }
 
-func (s *SoundCap) rspCallBack(rsp *x.AllResponse) error {
-	fmt.Println(rsp.Result.Result)
-	return nil
-}
+func NewSoundCap(ctx context.Context, config *Config, asrCb AsrResultCallBack) (*SoundCap, error) {
+	if len(config.ProxyAddr) == 0 {
+		panic("len of config ProxyAddr == 0")
+	}
+	if len(config.ExeDevParam) == 0 {
+		panic("len of config ExeDevParam == 0")
+	}
 
-func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 	sc := &SoundCap{
 		buff:          &bytes.Buffer{},
 		channelNum:    1,
 		sampleRate:    16000,
 		bitsPerSample: 16,
+		isClosed:      0,
+		Config:        *config,
 	}
 
 	var err error = nil
-	sc.asrClient, err = x.NewClient(proxyAddr)
+	sc.asrClient, err = x.NewClient(sc.ProxyAddr)
 	if err != nil {
 		return nil, err
 	}
 	err = sc.asrClient.Start(x.StartConfig{
 		SampleRate:    int32(sc.sampleRate),
 		BitsPerSample: int32(sc.bitsPerSample),
-	}, sc.rspCallBack)
+	}, asrCb)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +64,7 @@ func NewSoundCap(ctx context.Context, proxyAddr string) (*SoundCap, error) {
 	//sc.cmd = exec.CommandContext(ctx, "winscap.exe",
 	//	toString(sc.channelNum), toString(sc.sampleRate), toString(sc.bitsPerSample))
 	sc.cmd = exec.CommandContext(ctx, "fmedia",
-		"--dev-loopback=1",
+		fmt.Sprintf("%s", sc.ExeDevParam),
 		"--record", "-o", "@stdout.wav",
 		"--format=int16",
 		"--channels=mono",
@@ -100,11 +112,11 @@ func (s *SoundCap) Write(p []byte) (n int, err error) {
 			panic(err)
 		}
 	}
-
 	return len(p), nil
 }
 
 func (s *SoundCap) Run() error {
+	defer s.close()
 	err := s.cmd.Run()
 	if err != nil {
 		return err
@@ -112,13 +124,32 @@ func (s *SoundCap) Run() error {
 	return err
 }
 
-func (s *SoundCap) Release() {
-	s.asrClient.Close()
+func (s *SoundCap) close() {
+	if !atomic.CompareAndSwapInt32(&s.isClosed, 0, 1) {
+		return
+	}
+	if s.cmd != nil && s.cmd.Process != nil && s.cmd.ProcessState == nil {
+		s.cmd.Process.Kill()
+	}
+	if s.asrClient != nil {
+		s.asrClient.Close()
+	}
 }
 
-func (s *SoundCap) Dump(fileName string) {
-	err := os.WriteFile(fileName, s.buff.Bytes(), os.ModePerm)
-	if err != nil {
+func (s *SoundCap) IsClose() bool {
+	return atomic.LoadInt32(&s.isClosed) == 1
+}
+
+func (s *SoundCap) Close() {
+	s.close()
+}
+
+func (s *SoundCap) DumpRecordAudio() {
+	if path.Exists(s.RecordFilePath) != nil {
+		return
+	}
+
+	if err := os.WriteFile(s.RecordFilePath, s.buff.Bytes(), os.ModePerm); err != nil {
 		panic(err)
 	}
 }
