@@ -112,6 +112,9 @@ func GetDevPlaybackAndCapture() (*DevPlaybackAndCapture, error) {
 			dpc.CaptureDefault = devInfoList[i].Name
 		}
 	}
+	if len(dpc.CaptureDefault) == 0 && len(devInfoList) > 0 {
+		dpc.CaptureDefault = devInfoList[0].Name
+	}
 
 	devInfoList, err = ListDevPlayback()
 	if err != nil {
@@ -122,6 +125,9 @@ func GetDevPlaybackAndCapture() (*DevPlaybackAndCapture, error) {
 		if devInfoList[i].IsDefault {
 			dpc.PlayBackDefault = devInfoList[i].Name
 		}
+	}
+	if len(dpc.PlayBackDefault) == 0 && len(devInfoList) > 0 {
+		dpc.PlayBackDefault = devInfoList[0].Name
 	}
 
 	return dpc, nil
@@ -145,6 +151,10 @@ func ListDev(mode C.ffuint) ([]DevInfo, error) {
 			return nil, fmt.Errorf("%w,%s", ErrFFAudioDev, errStr)
 		}
 		indexStr := DevInfoFormat(unsafe.Pointer(C.dev_info_DEV_ID(d)))
+		isDefault := false
+		if C.dev_info(d, C.FFAUDIO_DEV_IS_DEFAULT) != nil {
+			isDefault = true
+		}
 
 		dev := DevInfo{
 			Name:       C.GoString(C.dev_info(d, C.FFAUDIO_DEV_NAME)),
@@ -152,6 +162,7 @@ func ListDev(mode C.ffuint) ([]DevInfo, error) {
 			Format:     int(C.dev_info_MIX_FORMAT_0(d)),
 			SampleRate: int(C.dev_info_MIX_FORMAT_1(d)),
 			Channels:   int(C.dev_info_MIX_FORMAT_2(d)),
+			IsDefault:  isDefault,
 		}
 		devs = append(devs, dev)
 	}
