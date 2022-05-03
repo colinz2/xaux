@@ -36,6 +36,7 @@ const char* dev_info(ffaudio_dev *d, ffuint i) {
 	return ffaudio_default_interface()->dev_info(d, i);
 }
 
+// windows
 wchar_t* dev_info_DEV_ID(ffaudio_dev *d) {
 	return (wchar_t*)(ffaudio_default_interface()->dev_info(d, FFAUDIO_DEV_ID));
 }
@@ -46,10 +47,12 @@ ffuint dev_info_MIX_FORMAT_0(ffaudio_dev *d) {
 }
 ffuint dev_info_MIX_FORMAT_1(ffaudio_dev *d) {
 	ffuint* a = (ffuint*)ffaudio_default_interface()->dev_info(d, FFAUDIO_DEV_MIX_FORMAT);
-	return a[1];}
+	return a[1];
+}
 ffuint dev_info_MIX_FORMAT_2(ffaudio_dev *d) {
 	ffuint* a = (ffuint*)ffaudio_default_interface()->dev_info(d, FFAUDIO_DEV_MIX_FORMAT);
-	return a[2];}
+	return a[2];
+}
 
 */
 import "C"
@@ -66,6 +69,13 @@ type DevInfo struct {
 	Format     int
 	SampleRate int
 	Channels   int
+}
+
+type DevPlaybackAndCapture struct {
+	PlayBackDefault     string
+	CaptureDefault      string
+	PlayBackDevNameList []string
+	CaptureDevNameList  []string
 }
 
 var (
@@ -88,6 +98,33 @@ func ListDevPlayback() ([]DevInfo, error) {
 
 func ListDevCapture() ([]DevInfo, error) {
 	return ListDev(C.FFAUDIO_DEV_CAPTURE)
+}
+
+func GetDevPlaybackAndCapture() (*DevPlaybackAndCapture, error) {
+	dpc := &DevPlaybackAndCapture{}
+	devInfoList, err := ListDevCapture()
+	if err != nil {
+		return nil, err
+	}
+	for i := range devInfoList {
+		dpc.CaptureDevNameList = append(dpc.CaptureDevNameList, devInfoList[i].Name)
+		if devInfoList[i].IsDefault {
+			dpc.CaptureDefault = devInfoList[i].Name
+		}
+	}
+
+	devInfoList, err = ListDevPlayback()
+	if err != nil {
+		return nil, err
+	}
+	for i := range devInfoList {
+		dpc.PlayBackDevNameList = append(dpc.PlayBackDevNameList, devInfoList[i].Name)
+		if devInfoList[i].IsDefault {
+			dpc.PlayBackDefault = devInfoList[i].Name
+		}
+	}
+
+	return dpc, nil
 }
 
 func ListDev(mode C.ffuint) ([]DevInfo, error) {
