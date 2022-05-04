@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/realzhangm/xaux/pkg/common/doa"
-	"github.com/realzhangm/xaux/pkg/common/path"
 	"github.com/realzhangm/xaux/pkg/x"
 	"os"
 	"os/exec"
@@ -22,6 +21,8 @@ type SoundCap struct {
 	sampleRate    int
 	bitsPerSample int
 	isClosed      int32
+	stdInChan     chan string
+	startDoneChan chan error
 	Config
 }
 
@@ -40,6 +41,8 @@ func NewSoundCap(ctx context.Context, config *Config, asrCb AsrResultCallBack) (
 	}
 
 	sc := &SoundCap{
+		stdInChan:     make(chan string),
+		startDoneChan: make(chan error, 1),
 		buff:          &bytes.Buffer{},
 		channelNum:    1,
 		sampleRate:    16000,
@@ -61,8 +64,6 @@ func NewSoundCap(ctx context.Context, config *Config, asrCb AsrResultCallBack) (
 		return nil, err
 	}
 
-	//sc.cmd = exec.CommandContext(ctx, "winscap.exe",
-	//	toString(sc.channelNum), toString(sc.sampleRate), toString(sc.bitsPerSample))
 	sc.cmd = exec.CommandContext(ctx, "fmedia",
 		fmt.Sprintf("%s", sc.ExeDevParam),
 		"--record", "-o", "@stdout.wav",
@@ -75,6 +76,7 @@ func NewSoundCap(ctx context.Context, config *Config, asrCb AsrResultCallBack) (
 	doa.MustTrue(sc.cmd != nil, "sc.cmd is nil")
 
 	sc.cmd.Stdout = sc
+	sc.cmd.Stdin = sc
 	return sc, nil
 }
 
@@ -86,7 +88,20 @@ func (s SoundCap) getMillisecond(len int) int {
 	return len / bytesPerMilli
 }
 
+func (s *SoundCap) Read(p []byte) (n int, err error) {
+	cmd, ok := <-s.stdInChan
+	if ok {
+		copy(p, []byte(cmd))
+		return len(cmd), nil
+	}
+	return 0, nil
+}
+
 func (s *SoundCap) Write(p []byte) (n int, err error) {
+	if s.IsClose() {
+		return 0, nil
+	}
+
 	dataLen := len(p)
 	doa.MustTrue(dataLen%2 == 0, "sample not even")
 	//fmt.Println("duration=", s.getMillisecond(dataLen))
@@ -115,13 +130,20 @@ func (s *SoundCap) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+func (s *SoundCap) StartDone() <-chan error {
+	return s.startDoneChan
+}
+
 func (s *SoundCap) Run() error {
 	defer s.close()
-	err := s.cmd.Run()
+
+	err := s.cmd.Start()
 	if err != nil {
+		s.startDoneChan <- err
 		return err
 	}
-	return err
+	s.startDoneChan <- nil
+	return s.cmd.Wait()
 }
 
 func (s *SoundCap) close() {
@@ -129,7 +151,8 @@ func (s *SoundCap) close() {
 		return
 	}
 	if s.cmd != nil && s.cmd.Process != nil && s.cmd.ProcessState == nil {
-		s.cmd.Process.Kill()
+		s.stdInChan <- "s"
+		fmt.Println("quit ffmedi")
 	}
 	if s.asrClient != nil {
 		s.asrClient.Close()
@@ -145,10 +168,9 @@ func (s *SoundCap) Close() {
 }
 
 func (s *SoundCap) DumpRecordAudio() {
-	if path.Exists(s.RecordFilePath) != nil {
+	if len(s.RecordFilePath) == 0 {
 		return
 	}
-
 	if err := os.WriteFile(s.RecordFilePath, s.buff.Bytes(), os.ModePerm); err != nil {
 		panic(err)
 	}

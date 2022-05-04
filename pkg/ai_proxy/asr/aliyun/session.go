@@ -103,7 +103,7 @@ func (s *Session) onStart() error {
 	param.Format = "wav"
 	exMap := make(map[string]interface{})
 	exMap["disfluency"] = true
-	exMap["enable_words"] = true
+	exMap["enable_words"] = false
 	exMap["enable_semantic_sentence_detection"] = false
 	ready, err := s.st.Start(param, exMap)
 	if err != nil {
