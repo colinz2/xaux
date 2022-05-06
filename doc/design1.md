@@ -21,7 +21,11 @@
 
 ## 信令
 
-tcp 长连接
+type + reserve + len
+
+- type : 1 byte 消息类型
+- reserve : 3 字节 保留
+- len : 消息长度
 
 ### 开始
 
@@ -79,7 +83,9 @@ response
 
 ## 语音流
 
-| 0-3 | 4-7 | 8-15 | | sessionID | sequence | reserve |
+| 0-3       |      4-7 |  8-15   |
+|:----------|---------:|:-------:|
+| sessionID | sequence | reserve |
 
 ## 命名
 

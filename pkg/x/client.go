@@ -70,16 +70,17 @@ func (c *Client) Close() {
 
 func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
 	reader := json.NewDecoder(c.tcpConn)
+	var err error = nil
 	for {
 		allRsp := AllResponse{}
-		err := reader.Decode(&allRsp)
+		err = reader.Decode(&allRsp)
 		if err != nil {
-			return
+			break
 		}
-		fmt.Println("allRsp : ", allRsp.Cmd)
-		switch allRsp.Cmd {
-		case CmdStart:
-		case CmdEnd:
+		fmt.Println("allRsp : ", allRsp.Type)
+		switch allRsp.Type {
+		case TypeStart:
+		case TypeEnd:
 			c.endRspChan <- &allRsp
 		default:
 			if cb != nil {
@@ -87,6 +88,7 @@ func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
 			}
 		}
 	}
+	fmt.Println("status=", StatusInit, ", ", err.Error())
 	c.status = StatusInit
 }
 
@@ -111,7 +113,7 @@ func (c *Client) Start(conf StartConfig, cb func(rsp *AllResponse) error) error 
 	if err != nil {
 		return err
 	}
-	if startRsp.Cmd != CmdStart {
+	if startRsp.Type != TypeStart {
 		return ErrNotStart
 	}
 
@@ -142,7 +144,7 @@ func (c *Client) End() error {
 	case allRsp = <-c.endRspChan:
 	}
 
-	if allRsp.Cmd != CmdEnd {
+	if allRsp.Type != TypeEnd {
 		return ErrNotEnd
 	}
 	c.status = StatusEnd

@@ -1,15 +1,21 @@
 package x
 
 const (
-	CmdEnd       = "end"
-	CmdStart     = "start"
-	CmdRecognize = "recognize"
-	CmdEvent     = "event"
-	CmdError     = "error"
+	CmdStart = "start"
+	CmdEnd   = "end"
 
-	EventSentenceStart = "SentenceStart"
-	EventSentenceEnd   = "SentenceEnd"
+	TypeStart         = CmdStart
+	TypeEnd           = CmdEnd
+	TypeError         = "error"
+	TypeSentenceStart = "SentenceStart"
+	TypeRecognizing   = "recognizing"
+	TypeSentenceEnd   = "SentenceEnd"
 )
+
+/*
+TypeEnd : 1. CmdEnd 2. 超时，错误等
+
+*/
 
 type Error struct {
 	Msg string `json:"msg"`
@@ -26,7 +32,7 @@ type Start struct {
 }
 
 type StartResponse struct {
-	Cmd       string `json:"cmd"`
+	Type      string `json:"type"`
 	Error     Error  `json:"error,omitempty"`
 	SessionID uint32 `json:"sessionID"`
 	UDPPort   int32  `json:"udpPort"`
@@ -37,7 +43,7 @@ type End struct {
 }
 
 type EndResponse struct {
-	Cmd   string `json:"cmd"`
+	Type  string `json:"type"`
 	Error Error  `json:"error,omitempty"`
 	Msg   string `json:"msg"`
 }
@@ -57,22 +63,28 @@ type RecognizeResult struct {
 	Words      []Words `json:"words,omitempty"`
 }
 
-type RecognizeResponse struct {
-	Cmd    string          `json:"cmd"`
+type StartResult struct {
+	Index int `json:"index"`
+	Time  int `json:"time"`
+}
+
+type SentenceStartResponse struct {
+	Type        string      `json:"type"`
+	StartResult StartResult `json:"startResult"`
+}
+
+type RecognizingResponse struct {
+	Type   string          `json:"type"`
 	Result RecognizeResult `json:"result"`
 }
 
-type Event struct {
-	Name string `json:"name"`
-}
-
-type EventResponse struct {
-	Cmd   string `json:"cmd"`
-	Event Event  `json:"event"`
+type SentenceEndResponse struct {
+	Type   string          `json:"type"`
+	Result RecognizeResult `json:"result"`
 }
 
 type ErrorResponse struct {
-	Cmd   string `json:"cmd"`
+	Type  string `json:"type"`
 	Error Error  `json:"error,omitempty"`
 }
 
@@ -82,10 +94,10 @@ type AllRequest struct {
 }
 
 type AllResponse struct {
-	Cmd       string          `json:"cmd"`
-	Msg       string          `json:"msg"`
-	SessionID uint32          `json:"sessionID"`
-	Error     Error           `json:"error,omitempty"`
-	Event     Event           `json:"event,omitempty"`
-	Result    RecognizeResult `json:"result,omitempty"`
+	Type        string          `json:"type"`
+	Msg         string          `json:"msg"`
+	SessionID   uint32          `json:"sessionID"`
+	Error       Error           `json:"error,omitempty"`
+	Result      RecognizeResult `json:"result,omitempty"`
+	StartResult StartResult     `json:"startResult,omitempty"`
 }

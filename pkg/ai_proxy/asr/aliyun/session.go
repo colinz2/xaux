@@ -68,6 +68,8 @@ func (s *SessionMaker) MakeSession(r x.IResponse) (x.ISession, error) {
 	return &sess, err
 }
 
+// Session TODO,
+// 两个状态，一个是 nls 的状态，一个是本身的会话状态
 type Session struct {
 	id          uint32
 	netRsp      *x.TCPResponse
@@ -98,7 +100,7 @@ func waitReady(ch chan bool) error {
 	return nil
 }
 
-func (s *Session) onStart() error {
+func (s *Session) startNLSSpeechTrans() error {
 	param := nls.DefaultSpeechTranscriptionParam()
 	param.Format = "wav"
 	exMap := make(map[string]interface{})
@@ -113,7 +115,7 @@ func (s *Session) onStart() error {
 	return waitReady(ready)
 }
 
-func (s *Session) onEnd() error {
+func (s *Session) StopNLSSpeechTrans() error {
 	ready, err := s.st.Stop()
 	if err != nil {
 		s.st.Shutdown()
@@ -125,8 +127,20 @@ func (s *Session) onEnd() error {
 		s.st.Shutdown()
 		return err
 	}
-	s.st.Shutdown()
+	// s.st.Shutdown()
 	return nil
+}
+
+func (s *Session) onCmdStart() error {
+	err := s.startNLSSpeechTrans()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Session) onCmdEnd() error {
+	return s.StopNLSSpeechTrans()
 }
 
 func (s *Session) CommandCb(allRequest *x.AllRequest) error {
@@ -139,15 +153,15 @@ func (s *Session) CommandCb(allRequest *x.AllRequest) error {
 	switch allRequest.Cmd {
 	case x.CmdStart:
 		var startRsp x.StartResponse
-		err = s.onStart()
+		err = s.onCmdStart()
 		if err != nil {
 			startRsp = x.StartResponse{
-				Cmd:   allRequest.Cmd,
+				Type:  x.TypeStart,
 				Error: x.Error{Msg: err.Error()},
 			}
 		} else {
 			startRsp = x.StartResponse{
-				Cmd:       allRequest.Cmd,
+				Type:      x.TypeStart,
 				SessionID: s.id,
 				UDPPort:   x.UDPPort,
 			}
@@ -156,16 +170,16 @@ func (s *Session) CommandCb(allRequest *x.AllRequest) error {
 		rspBuf, _ = json.Marshal(&startRsp)
 	case x.CmdEnd:
 		var endRsp x.EndResponse
-		err = s.onEnd()
+		err = s.onCmdEnd()
 		if err != nil {
 			endRsp = x.EndResponse{
-				Cmd:   allRequest.Cmd,
+				Type:  x.TypeEnd,
 				Error: x.Error{Msg: err.Error()},
 			}
 		} else {
 			endRsp = x.EndResponse{
-				Cmd: allRequest.Cmd,
-				Msg: "session end!",
+				Type: x.TypeEnd,
+				Msg:  "session end!",
 			}
 		}
 		rspBuf, _ = json.Marshal(&endRsp)
@@ -177,6 +191,7 @@ func (s *Session) CommandCb(allRequest *x.AllRequest) error {
 	}
 	return nil
 }
+
 func (s *Session) DataCb(data []byte, seq uint32) error {
 	var buf16k []byte
 	var err error

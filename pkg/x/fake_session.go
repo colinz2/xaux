@@ -38,15 +38,15 @@ func (f *FakeSession) CommandCb(allResponse *AllRequest) error {
 	var rspBuf []byte
 	if cmd == CmdStart {
 		startRsp := StartResponse{
-			Cmd:       cmd,
+			Type:      cmd,
 			SessionID: f.id,
 			UDPPort:   UDPPort,
 		}
 		rspBuf, _ = json.Marshal(&startRsp)
 	} else if cmd == CmdEnd {
 		endRsp := EndResponse{
-			Cmd: cmd,
-			Msg: "session end!",
+			Type: cmd,
+			Msg:  "session end!",
 		}
 		rspBuf, _ = json.Marshal(&endRsp)
 	}
