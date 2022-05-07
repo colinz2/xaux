@@ -1,21 +1,20 @@
 package x
 
 const (
-	CmdStart = "start"
-	CmdEnd   = "end"
+	CmdStart = "S"
+	CmdEnd   = "E"
 
-	TypeRspStart      = CmdStart
-	TypeRspEnd        = CmdEnd
-	TypeClose         = "close" // 代表关闭会话
-	TypeSentenceStart = "SentenceStart"
-	TypeRecognizing   = "recognizing"
-	TypeSentenceEnd   = "SentenceEnd"
+	TypeRspStart      = "RS"
+	TypeRspEnd        = "RE"
+	TypeStop          = "STOP" // 代表关闭会话
+	TypeSentenceStart = "SS"
+	TypeRecognizing   = "R"
+	TypeSentenceEnd   = "SE"
 )
 
 /*
 TypeRspEnd : 1. CmdEnd
-TypeClose :  服务端主动关闭识别会话
-
+TypeStop :  服务端主动关闭识别会话
 */
 
 type Error struct {
@@ -84,7 +83,7 @@ type SentenceEndResponse struct {
 	Result RecognizeResult `json:"result"`
 }
 
-type CloseResponse struct {
+type StopResponse struct {
 	Type            string `json:"type"`
 	Error           Error  `json:"error,omitempty"`
 	ConnectionClose bool   `json:"connectionClose"`
@@ -99,6 +98,7 @@ type AllResponse struct {
 	Type            string          `json:"type"`
 	SessionID       uint32          `json:"sessionID"`
 	TaskID          string          `json:"taskID"`
+	UDPPort         int32           `json:"udpPort"`
 	Error           Error           `json:"error,omitempty"`
 	Result          RecognizeResult `json:"result,omitempty"`
 	StartResult     StartResult     `json:"startResult,omitempty"`

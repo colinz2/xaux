@@ -51,6 +51,12 @@ type NLSStatus struct {
 	status uint32
 }
 
+func (n *NLSStatus) reset() {
+	n.Lock()
+	n.status = NLSStatusNone
+	n.Unlock()
+}
+
 func (n *NLSStatus) setOpened() bool {
 	ok := false
 	n.Lock()
@@ -154,6 +160,7 @@ func (s *Session) newNLS() error {
 	}
 	config, err := nls.NewConnectionConfigWithAKInfoDefault(WsUrlBeijing, APPKEY, AKID, AKKEY)
 	if err != nil {
+		s.nlsStatus.reset()
 		return err
 	}
 
@@ -162,6 +169,7 @@ func (s *Session) newNLS() error {
 		onSentenceBegin, onSentenceEnd, onResultChanged,
 		onCompleted, onClose, s)
 	if err != nil {
+		s.nlsStatus.reset()
 		return err
 	}
 	return nil

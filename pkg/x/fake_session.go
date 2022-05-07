@@ -60,6 +60,5 @@ func (f *FakeSession) CommandCb(allResponse *AllRequest) error {
 	return nil
 }
 func (f *FakeSession) DataCb(data []byte, seq uint32) {
-	fmt.Println("get seq=", seq, ", data len=", len(data))
 	return
 }

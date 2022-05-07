@@ -7,35 +7,43 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 )
+
+type AsrResultCallBack func(rsp *AllResponse) error
 
 const (
 	UDPSendLen = 1460
 )
 
 var (
-	ErrClient   = errors.New("x client error")
-	ErrNotStart = fmt.Errorf("%w, %s", ErrClient, "status not start")
-	ErrNotEnd   = fmt.Errorf("%w, %s", ErrClient, "status not end")
+	ErrClient          = errors.New("x client error")
+	ErrNoLooping       = fmt.Errorf("%w, %s", ErrClient, "no looping read")
+	ErrNotStart        = fmt.Errorf("%w, %s", ErrClient, "status not start")
+	ErrStartRspTimeOut = fmt.Errorf("%w, %s", ErrClient, "start response timeout")
+	ErrEndRspTimeOut   = fmt.Errorf("%w, %s", ErrClient, "end response timeout")
+	ErrNotEnd          = fmt.Errorf("%w, %s", ErrClient, "status not end")
 )
 
 type Client struct {
-	status     int32
-	tcpConn    net.Conn
-	udpConn    *net.UDPConn
-	sessionID  uint32
-	udpPort    int32
-	seq        uint32
-	agentIP    string
-	buffer     bytes.Buffer
-	rspChan    chan *AllResponse
-	endRspChan chan *AllResponse
+	status        int32
+	tcpConn       net.Conn
+	udpConn       *net.UDPConn
+	sessionID     uint32
+	udpPort       int32
+	seq           uint32
+	agentIP       string
+	buffer        bytes.Buffer
+	rspChan       chan *AllResponse
+	endRspChan    chan *AllResponse
+	startRspChan  chan *AllResponse
+	isLoopingRead int32
+	cb            AsrResultCallBack
 }
 
-// TODO 处理返回结果
-
-func NewClient(agentAddr string) (*Client, error) {
+// NewClient TODO 处理返回结果
+func NewClient(agentAddr string, cb AsrResultCallBack) (*Client, error) {
 	addr, err := net.ResolveTCPAddr("tcp", agentAddr)
 	if err != nil {
 		return nil, err
@@ -47,27 +55,79 @@ func NewClient(agentAddr string) (*Client, error) {
 	}
 
 	client := &Client{
-		status:     StatusInit,
-		tcpConn:    conn,
-		agentIP:    addr.IP.String(),
-		seq:        1,
-		rspChan:    make(chan *AllResponse, 1),
-		endRspChan: make(chan *AllResponse, 1),
+		status:       StatusInit,
+		tcpConn:      conn,
+		agentIP:      addr.IP.String(),
+		seq:          1,
+		rspChan:      make(chan *AllResponse, 1),
+		endRspChan:   make(chan *AllResponse, 0),
+		startRspChan: make(chan *AllResponse, 0),
+		cb:           cb,
 	}
+	atomic.AddInt32(&client.isLoopingRead, 1)
+	go client.loopResponse()
 	return client, nil
 }
 
+func (c *Client) Start(conf StartConfig) error {
+	if atomic.LoadInt32(&c.isLoopingRead) != 1 {
+		return ErrNoLooping
+	}
+
+	err := c._start(&conf)
+	if err != nil {
+		return err
+	}
+	c.status = StatusStart
+	return nil
+}
+
+func (c *Client) End() error {
+	if atomic.LoadInt32(&c.isLoopingRead) != 1 {
+		return ErrNoLooping
+	}
+	if c.status != StatusStart {
+		return nil
+	}
+
+	err := c._end()
+	if err != nil {
+		return nil
+	}
+	c.status = StatusEnd
+	return nil
+}
+
+func (c *Client) Send(data []byte) (err error) {
+	if atomic.LoadInt32(&c.isLoopingRead) != 1 {
+		return ErrNoLooping
+	}
+
+	if c.status != StatusStart {
+		return ErrNotStart
+	}
+	return c._send(data)
+}
+
 func (c *Client) Close() {
+	c.isLoopingRead = 0
+	c.status = StatusInit
+
 	if c.tcpConn != nil {
 		c.tcpConn.Close()
+		c.tcpConn = nil
 	}
 	if c.udpConn != nil {
-		c.sentBuffer(true)
 		c.udpConn.Close()
+		c.udpConn = nil
+		c.isLoopingRead = 0
 	}
 }
 
-func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
+func (c *Client) loopResponse() {
+	if c.cb == nil {
+		panic("c.cb is nil")
+	}
 	reader := json.NewDecoder(c.tcpConn)
 	var err error = nil
 	for {
@@ -76,25 +136,55 @@ func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
 		if err != nil {
 			break
 		}
-		fmt.Println("allRsp : ", allRsp.Type)
 		switch allRsp.Type {
 		case TypeRspStart:
+			c.startRspChan <- &allRsp
 		case TypeRspEnd:
 			c.endRspChan <- &allRsp
+		case TypeStop:
+			sr := StopResponse{
+				Type:            allRsp.Type,
+				Error:           allRsp.Error,
+				ConnectionClose: allRsp.ConnectionClose,
+			}
+			if sr.ConnectionClose {
+				break
+			} else {
+				c.status = StatusEnd
+			}
 		default:
-			if cb != nil {
-				cb(&allRsp)
+			if c.cb != nil {
+				c.cb(&allRsp)
 			}
 		}
 	}
-	fmt.Println("status=", StatusInit, ", ", err.Error())
+	fmt.Println("loopResponse err := ", err.Error())
 	c.status = StatusInit
+	atomic.AddInt32(&c.isLoopingRead, -1)
 }
 
-func (c *Client) Start(conf StartConfig, cb func(rsp *AllResponse) error) error {
+func (c *Client) getStartRsp() (*StartResponse, error) {
+	timer := time.NewTimer(time.Second * 5)
+	var allRsp *AllResponse
+	select {
+	case allRsp = <-c.startRspChan:
+		timer.Stop()
+	case <-timer.C:
+		return nil, ErrStartRspTimeOut
+	}
+	return &StartResponse{
+		Type:      allRsp.Type,
+		SessionID: allRsp.SessionID,
+		TaskID:    allRsp.TaskID,
+		UDPPort:   allRsp.UDPPort,
+		Error:     allRsp.Error,
+	}, nil
+}
+
+func (c *Client) _start(conf *StartConfig) error {
 	start := Start{
 		Cmd:    CmdStart,
-		Config: conf,
+		Config: *conf,
 	}
 	buf, err := json.Marshal(&start)
 	if err != nil {
@@ -105,10 +195,7 @@ func (c *Client) Start(conf StartConfig, cb func(rsp *AllResponse) error) error 
 		return err
 	}
 
-	startRsp := StartResponse{}
-	c.tcpConn.SetReadDeadline(time.Now().Add(time.Second * 10))
-	jDecoder := json.NewDecoder(c.tcpConn)
-	err = jDecoder.Decode(&startRsp)
+	startRsp, err := c.getStartRsp()
 	if err != nil {
 		return err
 	}
@@ -118,13 +205,10 @@ func (c *Client) Start(conf StartConfig, cb func(rsp *AllResponse) error) error 
 
 	c.sessionID = startRsp.SessionID
 	c.udpPort = startRsp.UDPPort
-	c.status = StatusStart
-	c.tcpConn.SetReadDeadline(time.Time{})
-	go c.goToLoopResponse(cb)
 	return nil
 }
 
-func (c *Client) End() error {
+func (c *Client) _end() error {
 	end := End{
 		Cmd: CmdEnd,
 	}
@@ -137,24 +221,18 @@ func (c *Client) End() error {
 		return err
 	}
 
-	// TODO timeout
-	var allRsp *AllResponse
 	select {
-	case allRsp = <-c.endRspChan:
+	case allRsp := <-c.endRspChan:
+		if allRsp.Type != TypeRspEnd {
+			return ErrNotEnd
+		}
+	case <-time.After(time.Second * 5):
+		return ErrEndRspTimeOut
 	}
-
-	if allRsp.Type != TypeRspEnd {
-		return ErrNotEnd
-	}
-	c.status = StatusEnd
 	return nil
 }
 
-func (c *Client) Send(data []byte) (err error) {
-	if c.status != StatusStart {
-		return ErrNotStart
-	}
-
+func (c *Client) _send(data []byte) (err error) {
 	c.buffer.Write(data)
 
 	if c.udpConn == nil {

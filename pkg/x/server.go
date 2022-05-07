@@ -94,7 +94,6 @@ func NewServer(conf Conf, opts ...Option) *Server {
 func (s *Server) getNewSession(conn net.Conn) (ISession, error) {
 	sess, err := s.sessionMaker.MakeSession(&TCPResponse{Conn: conn})
 	if err != nil {
-		fmt.Println("MakeSession err :", err)
 		return nil, err
 	}
 	atomic.AddInt64(&s.sessionCnt, 1)
@@ -166,20 +165,17 @@ func (s *Server) udpServerStart() (err error) {
 		if err != nil {
 			panic(err)
 		}
-		//fmt.Println("cAddr :=", cAddr.String())
 
 		if dataLen > 16 {
 			sID := binary.BigEndian.Uint32(buf[0:4])
 			seq := binary.BigEndian.Uint32(buf[4:8])
 			s.sessionMu.Lock()
 			sess, exist := s.sessionMap[sID]
-			s.sessionMu.Unlock()
 			if exist {
 				doa.MustTrue(sID == sess.ID(), "sID == sess.ID()")
 				sess.DataCb(buf[16:dataLen], seq)
-			} else {
-				fmt.Println(sID, ",can not find")
 			}
+			s.sessionMu.Unlock()
 		}
 	}
 	return nil
