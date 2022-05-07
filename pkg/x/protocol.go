@@ -4,16 +4,17 @@ const (
 	CmdStart = "start"
 	CmdEnd   = "end"
 
-	TypeStart         = CmdStart
-	TypeEnd           = CmdEnd
-	TypeError         = "error"
+	TypeRspStart      = CmdStart
+	TypeRspEnd        = CmdEnd
+	TypeClose         = "close" // 代表关闭会话
 	TypeSentenceStart = "SentenceStart"
 	TypeRecognizing   = "recognizing"
 	TypeSentenceEnd   = "SentenceEnd"
 )
 
 /*
-TypeEnd : 1. CmdEnd 2. 超时，错误等
+TypeRspEnd : 1. CmdEnd
+TypeClose :  服务端主动关闭识别会话
 
 */
 
@@ -33,9 +34,10 @@ type Start struct {
 
 type StartResponse struct {
 	Type      string `json:"type"`
-	Error     Error  `json:"error,omitempty"`
 	SessionID uint32 `json:"sessionID"`
+	TaskID    string `json:"taskID"`
 	UDPPort   int32  `json:"udpPort"`
+	Error     Error  `json:"error,omitempty"`
 }
 
 type End struct {
@@ -45,7 +47,6 @@ type End struct {
 type EndResponse struct {
 	Type  string `json:"type"`
 	Error Error  `json:"error,omitempty"`
-	Msg   string `json:"msg"`
 }
 
 type Words struct {
@@ -83,9 +84,10 @@ type SentenceEndResponse struct {
 	Result RecognizeResult `json:"result"`
 }
 
-type ErrorResponse struct {
-	Type  string `json:"type"`
-	Error Error  `json:"error,omitempty"`
+type CloseResponse struct {
+	Type            string `json:"type"`
+	Error           Error  `json:"error,omitempty"`
+	ConnectionClose bool   `json:"connectionClose"`
 }
 
 type AllRequest struct {
@@ -94,10 +96,11 @@ type AllRequest struct {
 }
 
 type AllResponse struct {
-	Type        string          `json:"type"`
-	Msg         string          `json:"msg"`
-	SessionID   uint32          `json:"sessionID"`
-	Error       Error           `json:"error,omitempty"`
-	Result      RecognizeResult `json:"result,omitempty"`
-	StartResult StartResult     `json:"startResult,omitempty"`
+	Type            string          `json:"type"`
+	SessionID       uint32          `json:"sessionID"`
+	TaskID          string          `json:"taskID"`
+	Error           Error           `json:"error,omitempty"`
+	Result          RecognizeResult `json:"result,omitempty"`
+	StartResult     StartResult     `json:"startResult,omitempty"`
+	ConnectionClose bool            `json:"connectionClose"`
 }

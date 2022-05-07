@@ -22,7 +22,8 @@ type ISessionMaker interface {
 type ISession interface {
 	ID() uint32
 	CommandCb(allResponse *AllRequest) error
-	DataCb(data []byte, seq uint32) error
+	DataCb(data []byte, seq uint32)
+	CloseAll()
 }
 
 type IResponse interface {
@@ -37,6 +38,10 @@ func (t *TCPResponse) Write(data []byte) (int, error) {
 	return t.Conn.Write(data)
 }
 
+func (t *TCPResponse) Close() {
+	t.Conn.Close()
+}
+
 type Conf struct {
 	TcpPort int
 	UdpPort int
@@ -46,10 +51,10 @@ type Server struct {
 	Conf
 	sessionCnt   int64
 	sessionMap   map[uint32]ISession
-	sessionMu    sync.Mutex
 	tcpListener  net.Listener
 	udpConn      *net.UDPConn
 	sessionMaker ISessionMaker
+	sessionMu    sync.Mutex
 }
 
 type Option func(s *Server)
@@ -86,19 +91,34 @@ func NewServer(conf Conf, opts ...Option) *Server {
 	return server
 }
 
-func (s *Server) processTcp(conn net.Conn) {
+func (s *Server) getNewSession(conn net.Conn) (ISession, error) {
 	sess, err := s.sessionMaker.MakeSession(&TCPResponse{Conn: conn})
 	if err != nil {
-		conn.Close()
 		fmt.Println("MakeSession err :", err)
-		return
+		return nil, err
 	}
 	atomic.AddInt64(&s.sessionCnt, 1)
-	defer conn.Close()
 
 	s.sessionMu.Lock()
 	s.sessionMap[sess.ID()] = sess
 	s.sessionMu.Unlock()
+	return sess, nil
+}
+
+func (s *Server) releaseSession(sess ISession) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	delete(s.sessionMap, sess.ID())
+}
+
+func (s *Server) processTcp(conn net.Conn) {
+	defer conn.Close()
+
+	sess, err := s.getNewSession(conn)
+	if err != nil {
+		return
+	}
+	defer s.releaseSession(sess)
 
 	reader := json.NewDecoder(conn)
 	for {
@@ -112,6 +132,7 @@ func (s *Server) processTcp(conn net.Conn) {
 			break
 		}
 	}
+	sess.CloseAll()
 }
 
 func (s *Server) tcpServerStart() (err error) {
@@ -143,7 +164,7 @@ func (s *Server) udpServerStart() (err error) {
 	for {
 		dataLen, _, err := s.udpConn.ReadFromUDP(buf)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		//fmt.Println("cAddr :=", cAddr.String())
 

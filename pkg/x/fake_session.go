@@ -30,6 +30,10 @@ func (f *FakeSession) ID() uint32 {
 	return f.id
 }
 
+func (f *FakeSession) CloseAll() {
+	return
+}
+
 func (f *FakeSession) CommandCb(allResponse *AllRequest) error {
 	buf, _ := json.MarshalIndent(allResponse, "", " ")
 	fmt.Println(string(buf))
@@ -46,7 +50,6 @@ func (f *FakeSession) CommandCb(allResponse *AllRequest) error {
 	} else if cmd == CmdEnd {
 		endRsp := EndResponse{
 			Type: cmd,
-			Msg:  "session end!",
 		}
 		rspBuf, _ = json.Marshal(&endRsp)
 	}
@@ -56,7 +59,7 @@ func (f *FakeSession) CommandCb(allResponse *AllRequest) error {
 	}
 	return nil
 }
-func (f *FakeSession) DataCb(data []byte, seq uint32) error {
+func (f *FakeSession) DataCb(data []byte, seq uint32) {
 	fmt.Println("get seq=", seq, ", data len=", len(data))
-	return nil
+	return
 }

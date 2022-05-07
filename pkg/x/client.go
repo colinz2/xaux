@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	UDPSendLen = 1300
+	UDPSendLen = 1460
 )
 
 var (
@@ -28,7 +28,6 @@ type Client struct {
 	udpPort    int32
 	seq        uint32
 	agentIP    string
-	endMsg     string
 	buffer     bytes.Buffer
 	rspChan    chan *AllResponse
 	endRspChan chan *AllResponse
@@ -79,8 +78,8 @@ func (c *Client) goToLoopResponse(cb func(rsp *AllResponse) error) {
 		}
 		fmt.Println("allRsp : ", allRsp.Type)
 		switch allRsp.Type {
-		case TypeStart:
-		case TypeEnd:
+		case TypeRspStart:
+		case TypeRspEnd:
 			c.endRspChan <- &allRsp
 		default:
 			if cb != nil {
@@ -113,7 +112,7 @@ func (c *Client) Start(conf StartConfig, cb func(rsp *AllResponse) error) error 
 	if err != nil {
 		return err
 	}
-	if startRsp.Type != TypeStart {
+	if startRsp.Type != TypeRspStart {
 		return ErrNotStart
 	}
 
@@ -144,11 +143,10 @@ func (c *Client) End() error {
 	case allRsp = <-c.endRspChan:
 	}
 
-	if allRsp.Type != TypeEnd {
+	if allRsp.Type != TypeRspEnd {
 		return ErrNotEnd
 	}
 	c.status = StatusEnd
-	c.endMsg = allRsp.Msg
 	return nil
 }
 

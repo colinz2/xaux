@@ -130,13 +130,13 @@ func onCompleted(text string, param interface{}) {
 	fmt.Println("text:", text)
 }
 
-// closed
+// closed 连接断开, 库中主动调用
 func onClose(param interface{}) {
 	sess, ok := param.(*Session)
 	if !ok {
 		panic("err")
 		return
 	}
-
+	sess.nlsStatus.setClosed()
 	fmt.Println("sessID:", sess.ID(), ", onClose")
 }
