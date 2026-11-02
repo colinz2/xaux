@@ -13,7 +13,7 @@ const (
 )
 
 /*
-TypeRspEnd : 1. CmdEnd
+TypeRspEnd : CmdEnd 的响应
 TypeStop :  服务端主动关闭识别会话
 */
 
@@ -50,8 +50,8 @@ type EndResponse struct {
 
 type Words struct {
 	Text      string `json:"text"`
-	Starttime int    `json:"startTime"`
-	Endtime   int    `json:"endTime"`
+	StartTime int    `json:"startTime"`
+	EndTime   int    `json:"endTime"`
 }
 
 type RecognizeResult struct {

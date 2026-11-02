@@ -9,6 +9,7 @@ var (
 	R48kTO16k func([]byte) ([]byte, error)
 )
 
+// load for linux
 func init() {
 	var goaway = false
 	switch runtime.GOOS {

@@ -4,13 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	nls "github.com/aliyun/alibabacloud-nls-go-sdk"
 	"os"
 	"sync"
 	"time"
-)
 
-import (
+	nls "github.com/aliyun/alibabacloud-nls-go-sdk"
 	"github.com/realzhangm/xaux/pkg/resample"
 	"github.com/realzhangm/xaux/pkg/x"
 )
@@ -207,9 +205,8 @@ func (s *Session) startNLSSpeechTrans() error {
 	if err := s.getSpeechTrans(); err != nil {
 		return err
 	}
-	fmt.Println("startNLSSpeechTrans")
 	param := nls.DefaultSpeechTranscriptionParam()
-	param.Format = "wav"
+	param.Format = "pcm" //wav
 	exMap := make(map[string]interface{})
 	exMap["disfluency"] = true
 	exMap["enable_words"] = false

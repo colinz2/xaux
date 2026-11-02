@@ -97,8 +97,8 @@ func (r *ResultChanged) convertToX() *x.RecognizingResponse {
 		xr.Result.Words = append(xr.Result.Words, func(words Words) x.Words {
 			w := x.Words{
 				Text:      words.Text,
-				Starttime: words.Starttime,
-				Endtime:   words.Endtime,
+				StartTime: words.Starttime,
+				EndTime:   words.Endtime,
 			}
 			return w
 		}(r.Payload.Words[i]))
@@ -117,8 +117,8 @@ func (r *SentenceEnd) convertToX() *x.RecognizingResponse {
 		xr.Result.Words = append(xr.Result.Words, func(words Words) x.Words {
 			w := x.Words{
 				Text:      words.Text,
-				Starttime: words.Starttime,
-				Endtime:   words.Endtime,
+				StartTime: words.Starttime,
+				EndTime:   words.Endtime,
 			}
 			return w
 		}(r.Payload.Words[i]))

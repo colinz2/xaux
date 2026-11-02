@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
-	"github.com/zaf/resample"
+	"github.com/realzhangm/xaux/pkg/resample/resample"
 	"sync"
 )
 
