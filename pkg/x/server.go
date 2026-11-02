@@ -143,6 +143,13 @@ func (s *Server) processTcp(conn net.Conn) {
 		if s.debug {
 			log.Printf("session %d: command=%q config=%+v", sess.ID(), request.Cmd, request.Config)
 		}
+		if request.Cmd == CmdStart && request.StatusUpdates {
+			status := StatusResponse{Type: TypeStatus, Status: StartStatusConnecting}
+			if err := json.NewEncoder(conn).Encode(status); err != nil {
+				log.Printf("session %d: write start status: %v", sess.ID(), err)
+				return
+			}
+		}
 		if err := sess.CommandCb(&request); err != nil {
 			if s.debug {
 				log.Printf("session %d: execute command %q: %v", sess.ID(), request.Cmd, err)

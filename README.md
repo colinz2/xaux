@@ -75,7 +75,7 @@ ffplay -f s16le -ar 48000 -ac 1 input.pcm
 
 Client 应按以下顺序调用，并检查每一步返回的错误：
 
-1. `NewClient` 连接 Proxy，收到成功的 `RS` 后才认为 `Start` 成功。
+1. `NewClient` 连接 Proxy，收到成功的 `RS` 后才认为 `Start` 成功。等待期间，响应回调会收到 `{"type":"STATUS","status":"connecting"}`，可立即显示“正在连接识别”；收到 `RS` 后再显示“已就绪”。原始协议客户端可在 `S` 请求中设置 `statusUpdates:true` 以启用此通知；未设置时不会收到额外消息。回调应快速返回，避免阻塞后续响应处理。
 2. `Send` 发送符合 `StartConfig` 的 PCM；格式为 16-bit、小端，采样率使用 16000 或 48000。
 3. `End` 会先发送剩余短尾包，再等待 `RE`。Start/End 中的 ASR 错误会直接作为 Go error 返回。
 4. 回调中应能看到 `SS`、`R` 或 `SE`；完成后调用 `Close`。

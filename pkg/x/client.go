@@ -223,7 +223,7 @@ func (c *Client) getStartRsp() (*StartResponse, error) {
 }
 
 func (c *Client) start(config StartConfig) error {
-	request := Start{Cmd: CmdStart, Config: config}
+	request := Start{Cmd: CmdStart, Config: config, StatusUpdates: true}
 	if err := json.NewEncoder(c.tcpConn).Encode(request); err != nil {
 		return err
 	}

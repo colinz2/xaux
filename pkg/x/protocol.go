@@ -6,10 +6,13 @@ const (
 
 	TypeRspStart      = "RS"
 	TypeRspEnd        = "RE"
+	TypeStatus        = "STATUS"
 	TypeStop          = "STOP" // 代表关闭会话
 	TypeSentenceStart = "SS"
 	TypeRecognizing   = "R"
 	TypeSentenceEnd   = "SE"
+
+	StartStatusConnecting = "connecting"
 )
 
 /*
@@ -27,8 +30,14 @@ type StartConfig struct {
 }
 
 type Start struct {
-	Cmd    string      `json:"cmd"`
-	Config StartConfig `json:"config"`
+	Cmd           string      `json:"cmd"`
+	Config        StartConfig `json:"config"`
+	StatusUpdates bool        `json:"statusUpdates,omitempty"`
+}
+
+type StatusResponse struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
 }
 
 type StartResponse struct {
@@ -90,12 +99,14 @@ type StopResponse struct {
 }
 
 type AllRequest struct {
-	Cmd    string      `json:"cmd"`
-	Config StartConfig `json:"config,omitempty"`
+	Cmd           string      `json:"cmd"`
+	Config        StartConfig `json:"config,omitempty"`
+	StatusUpdates bool        `json:"statusUpdates,omitempty"`
 }
 
 type AllResponse struct {
 	Type            string          `json:"type"`
+	Status          string          `json:"status,omitempty"`
 	SessionID       uint32          `json:"sessionID"`
 	TaskID          string          `json:"taskID"`
 	UDPPort         int32           `json:"udpPort"`

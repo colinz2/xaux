@@ -68,6 +68,89 @@ func TestClientPropagatesEndError(t *testing.T) {
 	}
 }
 
+func TestClientReceivesConnectingStatusWhileStartWaits(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	allowStartResponse := make(chan struct{})
+	defer func() {
+		select {
+		case <-allowStartResponse:
+		default:
+			close(allowStartResponse)
+		}
+	}()
+	serverDone := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		defer conn.Close()
+
+		var request Start
+		if err := json.NewDecoder(conn).Decode(&request); err != nil {
+			serverDone <- err
+			return
+		}
+		if request.Cmd != CmdStart || !request.StatusUpdates {
+			serverDone <- fmt.Errorf("start request = %+v, want status updates enabled", request)
+			return
+		}
+
+		encoder := json.NewEncoder(conn)
+		if err := encoder.Encode(&StatusResponse{Type: TypeStatus, Status: StartStatusConnecting}); err != nil {
+			serverDone <- err
+			return
+		}
+		<-allowStartResponse
+		serverDone <- encoder.Encode(&StartResponse{Type: TypeRspStart, SessionID: 1, UDPPort: UDPPort})
+	}()
+
+	statuses := make(chan *AllResponse, 1)
+	client, err := NewClient(listener.Addr().String(), func(response *AllResponse) error {
+		statuses <- response
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	startDone := make(chan error, 1)
+	go func() {
+		startDone <- client.Start(StartConfig{SampleRate: 16000})
+	}()
+
+	select {
+	case status := <-statuses:
+		if status.Type != TypeStatus || status.Status != StartStatusConnecting {
+			t.Fatalf("status response = %+v", status)
+		}
+	case err := <-startDone:
+		t.Fatalf("Start completed before status was received: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for connecting status")
+	}
+
+	close(allowStartResponse)
+	select {
+	case err := <-startDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Start response")
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("test server: %v", err)
+	}
+}
+
 func TestNewClientRejectsNilCallback(t *testing.T) {
 	if _, err := NewClient("127.0.0.1:1", nil); err == nil {
 		t.Fatal("expected nil callback to be rejected")
