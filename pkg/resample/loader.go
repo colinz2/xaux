@@ -1,42 +1,32 @@
 package resample
 
 import (
+	"log"
 	"plugin"
 	"runtime"
 )
 
-var (
-	R48kTO16k func([]byte) ([]byte, error)
-)
+var R48kTO16k func([]byte) ([]byte, error)
 
-// load for linux
 func init() {
-	var goaway = false
-	switch runtime.GOOS {
-	case "linux", "darwin":
-		goaway = false
-	default:
-		goaway = true
-	}
-
-	if goaway {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		return
 	}
 
 	p, err := plugin.Open("resample.so")
 	if err != nil {
-		panic(err)
+		log.Printf("resample plugin is unavailable: %v", err)
+		return
 	}
-	s, err := p.Lookup("ReSample4816")
+	symbol, err := p.Lookup("ReSample4816")
 	if err != nil {
-		panic(err)
+		log.Printf("resample plugin symbol is unavailable: %v", err)
+		return
 	}
-	var ok bool = false
-	R48kTO16k, ok = s.(func([]byte) ([]byte, error))
-	if !ok {
-		panic("ReSample4816 load fail!")
+	resampler, ok := symbol.(func([]byte) ([]byte, error))
+	if !ok || resampler == nil {
+		log.Printf("resample plugin has an invalid ReSample4816 symbol")
+		return
 	}
-	if R48kTO16k == nil {
-		panic("ReSample4816 is nil")
-	}
+	R48kTO16k = resampler
 }

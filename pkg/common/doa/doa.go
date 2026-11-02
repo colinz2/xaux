@@ -1,15 +1,18 @@
 package doa
 
-import "io"
+import (
+	"errors"
+	"io"
+)
 
-func MustTrue(m bool, msg string) {
-	if m == false {
+func MustTrue(ok bool, msg string) {
+	if !ok {
 		panic(msg)
 	}
 }
 
 func PanicExceptIOEOF(err error) {
-	if err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		panic(err)
 	}
 }

@@ -1,17 +1,15 @@
 package x
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/realzhangm/xaux/pkg/common/doa"
+	"io"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
-)
 
-import (
 	"golang.org/x/sync/errgroup"
 )
 
@@ -54,7 +52,8 @@ type Server struct {
 	tcpListener  net.Listener
 	udpConn      *net.UDPConn
 	sessionMaker ISessionMaker
-	sessionMu    sync.Mutex
+	sessionMu    sync.RWMutex
+	debug        bool
 }
 
 type Option func(s *Server)
@@ -62,6 +61,12 @@ type Option func(s *Server)
 func WithOptionSessionMaker(sm ISessionMaker) Option {
 	return func(s *Server) {
 		s.sessionMaker = sm
+	}
+}
+
+func WithDebug(debug bool) Option {
+	return func(s *Server) {
+		s.debug = debug
 	}
 }
 
@@ -87,7 +92,6 @@ func NewServer(conf Conf, opts ...Option) *Server {
 		server.sessionMaker = NewFakeSessionMaker()
 	}
 
-	doa.MustTrue(server.sessionMaker != nil, "sessionMake is nil")
 	return server
 }
 
@@ -112,34 +116,43 @@ func (s *Server) releaseSession(sess ISession) {
 
 func (s *Server) processTcp(conn net.Conn) {
 	defer conn.Close()
+	if s.debug {
+		log.Printf("client connected: %s", conn.RemoteAddr())
+		defer log.Printf("client disconnected: %s", conn.RemoteAddr())
+	}
 
 	sess, err := s.getNewSession(conn)
 	if err != nil {
+		if s.debug {
+			log.Printf("create ASR session: %v", err)
+		}
 		return
 	}
 	defer s.releaseSession(sess)
+	defer sess.CloseAll()
 
 	reader := json.NewDecoder(conn)
 	for {
-		allReq := AllRequest{}
-		err = reader.Decode(&allReq)
-		if err != nil {
-			break
+		request := AllRequest{}
+		if err := reader.Decode(&request); err != nil {
+			if s.debug && err != io.EOF {
+				log.Printf("session %d: decode client command: %v", sess.ID(), err)
+			}
+			return
 		}
-		err = sess.CommandCb(&allReq)
-		if err != nil {
-			break
+		if s.debug {
+			log.Printf("session %d: command=%q config=%+v", sess.ID(), request.Cmd, request.Config)
+		}
+		if err := sess.CommandCb(&request); err != nil {
+			if s.debug {
+				log.Printf("session %d: execute command %q: %v", sess.ID(), request.Cmd, err)
+			}
+			return
 		}
 	}
-	sess.CloseAll()
 }
 
-func (s *Server) tcpServerStart() (err error) {
-	s.tcpListener, err = net.Listen("tcp", fmt.Sprintf(":%d", s.TcpPort))
-	if err != nil {
-		return
-	}
-
+func (s *Server) tcpServerStart() error {
 	for {
 		conn, err := s.tcpListener.Accept()
 		if err != nil {
@@ -147,52 +160,73 @@ func (s *Server) tcpServerStart() (err error) {
 		}
 		go s.processTcp(conn)
 	}
-	return nil
 }
 
-func (s *Server) udpServerStart() (err error) {
-	s.udpConn, err = net.ListenUDP("udp", &net.UDPAddr{
+func (s *Server) udpServerStart() error {
+	buf := make([]byte, 2048)
+	for {
+		dataLen, _, err := s.udpConn.ReadFromUDP(buf)
+		if err != nil {
+			return err
+		}
+		if dataLen <= 16 {
+			continue
+		}
+
+		sessionID := binary.BigEndian.Uint32(buf[0:4])
+		seq := binary.BigEndian.Uint32(buf[4:8])
+		s.sessionMu.RLock()
+		sess, exists := s.sessionMap[sessionID]
+		if exists && sess.ID() == sessionID {
+			sess.DataCb(buf[16:dataLen], seq)
+		}
+		s.sessionMu.RUnlock()
+		if s.debug && !exists {
+			log.Printf("UDP packet for unknown session %d: seq=%d bytes=%d", sessionID, seq, dataLen-16)
+		}
+	}
+}
+
+func (s *Server) Start() error {
+	if err := s.listen(); err != nil {
+		s.Close()
+		return err
+	}
+	if s.debug {
+		log.Printf("proxy listening: tcp=%s udp=%s", s.tcpListener.Addr(), s.udpConn.LocalAddr())
+	}
+
+	var group errgroup.Group
+	group.Go(func() error {
+		defer s.Close()
+		return s.udpServerStart()
+	})
+	group.Go(func() error {
+		defer s.Close()
+		return s.tcpServerStart()
+	})
+	return group.Wait()
+}
+
+func (s *Server) listen() error {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.TcpPort))
+	if err != nil {
+		return err
+	}
+	s.tcpListener = listener
+
+	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{
 		IP:   net.IPv4(0, 0, 0, 0),
 		Port: s.UdpPort,
 	})
 	if err != nil {
 		return err
 	}
-
-	buf := make([]byte, 2048)
-	for {
-		dataLen, _, err := s.udpConn.ReadFromUDP(buf)
-		if err != nil {
-			panic(err)
-		}
-
-		if dataLen > 16 {
-			sID := binary.BigEndian.Uint32(buf[0:4])
-			seq := binary.BigEndian.Uint32(buf[4:8])
-			s.sessionMu.Lock()
-			sess, exist := s.sessionMap[sID]
-			if exist {
-				doa.MustTrue(sID == sess.ID(), "sID == sess.ID()")
-				sess.DataCb(buf[16:dataLen], seq)
-			}
-			s.sessionMu.Unlock()
-		}
+	s.udpConn = udpConn
+	if err := udpConn.SetReadBuffer(4 * 1024 * 1024); err != nil && s.debug {
+		log.Printf("set UDP read buffer: %v", err)
 	}
 	return nil
-}
-
-func (s *Server) Start() error {
-	g, _ := errgroup.WithContext(context.TODO())
-	g.Go(func() error {
-		return s.udpServerStart()
-	})
-
-	g.Go(func() error {
-		return s.tcpServerStart()
-	})
-
-	err := g.Wait()
-	return err
 }
 
 func (s *Server) Close() {

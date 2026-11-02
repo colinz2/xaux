@@ -2,141 +2,92 @@ package aliyun
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 )
 
-// 错误返回
 func onTaskFailed(text string, param interface{}) {
-	sess, ok := param.(*Session)
-	if !ok {
-		panic("err")
-		return
+	sess := callbackSession(param, "onTaskFailed", text)
+	if sess != nil {
+		var result TaskFailed
+		decodeCallback(text, &result)
 	}
-
-	rst := TaskFailed{}
-	err := json.Unmarshal([]byte(text), &rst)
-	if err != nil {
-		panic(err)
-		return
-	}
-
-	fmt.Println("sessID:", sess.ID(), " onTaskFailed")
-	fmt.Println("text:", text)
 }
 
-// start cmd response return from AliYun
 func onStarted(text string, param interface{}) {
-	sess, ok := param.(*Session)
-	if !ok {
-		panic("err")
-		return
-	}
-
-	fmt.Println("sessID:", sess.ID(), ", onStarted")
-	fmt.Println("text:", text)
-
-	rst := Started{}
-	err := json.Unmarshal([]byte(text), &rst)
-	if err != nil {
-		panic(err)
-		return
+	sess := callbackSession(param, "onStarted", text)
+	if sess != nil {
+		var result Started
+		decodeCallback(text, &result)
 	}
 }
 
-// 句子开始，有返回给客户端
 func onSentenceBegin(text string, param interface{}) {
-	sess, ok := param.(*Session)
-	if !ok {
-		panic("err")
+	sess := callbackSession(param, "onSentenceBegin", text)
+	if sess == nil {
 		return
 	}
-
-	fmt.Println("sessID:", sess.ID(), ", onSentenceBegin")
-	fmt.Println("text:", text)
-
-	rst := SentenceBegin{}
-	err := json.Unmarshal([]byte(text), &rst)
-	if err != nil {
-		panic(err)
-		return
+	var result SentenceBegin
+	if decodeCallback(text, &result) {
+		writeCallbackJSON(sess, result.convertToX())
 	}
-	xr := rst.convertToX()
-	buff, err := json.Marshal(&xr)
-	if err != nil {
-		panic(err)
-		return
-	}
-	sess.netRsp.Write(buff)
 }
 
-// 句子结束，有返回给客户端
 func onSentenceEnd(text string, param interface{}) {
-	sess, ok := param.(*Session)
-	if !ok {
-		panic("err")
+	sess := callbackSession(param, "onSentenceEnd", text)
+	if sess == nil {
 		return
 	}
-
-	fmt.Println("sessID:", sess.ID(), ", onSentenceEnd")
-	fmt.Println("text:", text)
-	rst := SentenceEnd{}
-	err := json.Unmarshal([]byte(text), &rst)
-	if err != nil {
-		panic(err)
-		return
+	var result SentenceEnd
+	if decodeCallback(text, &result) {
+		writeCallbackJSON(sess, result.convertToX())
 	}
-	recognizeResponse := rst.convertToX()
-	buff, err := json.Marshal(&recognizeResponse)
-	if err != nil {
-		panic(err)
-		return
-	}
-	sess.netRsp.Write(buff)
 }
 
-// 结果更新
 func onResultChanged(text string, param interface{}) {
-	sess, ok := param.(*Session)
-	if !ok {
-		panic("err")
+	sess := callbackSession(param, "onResultChanged", text)
+	if sess == nil {
 		return
 	}
-
-	fmt.Println("sessID:", sess.ID(), ", onResultChanged")
-	fmt.Println("text:", text)
-
-	rst := ResultChanged{}
-	err := json.Unmarshal([]byte(text), &rst)
-	if err != nil {
-		return
+	var result ResultChanged
+	if decodeCallback(text, &result) {
+		writeCallbackJSON(sess, result.convertToX())
 	}
-	recognizeResponse := rst.convertToX()
-	buff, err := json.Marshal(&recognizeResponse)
-	if err != nil {
-		panic(err)
-		return
-	}
-	sess.netRsp.Write(buff)
 }
 
-// stop cmd response return from AliYun
 func onCompleted(text string, param interface{}) {
-	sess, ok := param.(*Session)
-	if !ok {
-		panic("err")
-		return
-	}
-	fmt.Println("sessID:", sess.ID(), ", onCompleted")
-	fmt.Println("text:", text)
+	callbackSession(param, "onCompleted", text)
 }
 
-// closed 连接断开, 库中主动调用
 func onClose(param interface{}) {
 	sess, ok := param.(*Session)
-	if !ok {
-		panic("err")
+	if !ok || sess == nil {
+		log.Printf("aliyun onClose: invalid session parameter")
 		return
 	}
 	sess.nlsStatus.setClosed()
-	fmt.Println("sessID:", sess.ID(), ", onClose")
+	log.Printf("sessID: %d, onClose", sess.ID())
+}
+
+func callbackSession(param interface{}, event, text string) *Session {
+	sess, ok := param.(*Session)
+	if !ok || sess == nil {
+		log.Printf("aliyun %s: invalid session parameter", event)
+		return nil
+	}
+	log.Printf("sessID: %d, %s, text: %s", sess.ID(), event, text)
+	return sess
+}
+
+func decodeCallback(text string, target interface{}) bool {
+	if err := json.Unmarshal([]byte(text), target); err != nil {
+		log.Printf("decode aliyun callback: %v", err)
+		return false
+	}
+	return true
+}
+
+func writeCallbackJSON(sess *Session, value interface{}) {
+	if err := sess.writeJSON(value); err != nil {
+		log.Printf("write aliyun callback for session %d: %v", sess.ID(), err)
+	}
 }

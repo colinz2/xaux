@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -14,7 +17,9 @@ import (
 type AsrResultCallBack func(rsp *AllResponse) error
 
 const (
-	UDPSendLen = 1460
+	UDPSendLen      = 1460
+	udpHeaderLen    = 16
+	responseTimeout = 5 * time.Second
 )
 
 var (
@@ -27,28 +32,33 @@ var (
 )
 
 type Client struct {
-	status        int32
-	tcpConn       net.Conn
-	udpConn       *net.UDPConn
-	sessionID     uint32
-	udpPort       int32
-	seq           uint32
-	agentIP       string
-	buffer        bytes.Buffer
-	rspChan       chan *AllResponse
-	endRspChan    chan *AllResponse
-	startRspChan  chan *AllResponse
-	isLoopingRead int32
-	cb            AsrResultCallBack
+	status    int32
+	running   int32
+	tcpConn   net.Conn
+	udpConn   *net.UDPConn
+	sessionID uint32
+	udpPort   int32
+	seq       uint32
+	agentIP   string
+	buffer    bytes.Buffer
+
+	startRspChan chan *AllResponse
+	endRspChan   chan *AllResponse
+	done         chan struct{}
+	closeOnce    sync.Once
+	commandMu    sync.Mutex
+	audioMu      sync.Mutex
+	cb           AsrResultCallBack
 }
 
-// NewClient TODO 处理返回结果
 func NewClient(agentAddr string, cb AsrResultCallBack) (*Client, error) {
+	if cb == nil {
+		return nil, errors.New("x client callback is nil")
+	}
 	addr, err := net.ResolveTCPAddr("tcp", agentAddr)
 	if err != nil {
 		return nil, err
 	}
-
 	conn, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
 		return nil, err
@@ -56,230 +66,238 @@ func NewClient(agentAddr string, cb AsrResultCallBack) (*Client, error) {
 
 	client := &Client{
 		status:       StatusInit,
+		running:      1,
 		tcpConn:      conn,
 		agentIP:      addr.IP.String(),
 		seq:          1,
-		rspChan:      make(chan *AllResponse, 1),
-		endRspChan:   make(chan *AllResponse, 0),
-		startRspChan: make(chan *AllResponse, 0),
+		startRspChan: make(chan *AllResponse, 1),
+		endRspChan:   make(chan *AllResponse, 1),
+		done:         make(chan struct{}),
 		cb:           cb,
 	}
-	atomic.AddInt32(&client.isLoopingRead, 1)
 	go client.loopResponse()
 	return client, nil
 }
 
-func (c *Client) Start(conf StartConfig) error {
-	if atomic.LoadInt32(&c.isLoopingRead) != 1 {
+func (c *Client) Start(config StartConfig) error {
+	if !c.isRunning() {
 		return ErrNoLooping
 	}
-
-	err := c._start(&conf)
-	if err != nil {
+	c.commandMu.Lock()
+	defer c.commandMu.Unlock()
+	if err := c.start(config); err != nil {
 		return err
 	}
-	c.status = StatusStart
+	atomic.StoreInt32(&c.status, StatusStart)
 	return nil
 }
 
 func (c *Client) End() error {
-	if atomic.LoadInt32(&c.isLoopingRead) != 1 {
+	if !c.isRunning() {
 		return ErrNoLooping
 	}
-	if c.status != StatusStart {
+	if atomic.LoadInt32(&c.status) != StatusStart {
 		return nil
 	}
 
-	err := c._end()
+	c.commandMu.Lock()
+	defer c.commandMu.Unlock()
+	c.audioMu.Lock()
+	err := c.sendBuffered(true)
+	c.audioMu.Unlock()
 	if err != nil {
-		return nil
+		return err
 	}
-	c.status = StatusEnd
+	if err := c.end(); err != nil {
+		return err
+	}
+	atomic.StoreInt32(&c.status, StatusEnd)
 	return nil
 }
 
-func (c *Client) Send(data []byte) (err error) {
-	if atomic.LoadInt32(&c.isLoopingRead) != 1 {
+func (c *Client) Send(data []byte) error {
+	if !c.isRunning() {
 		return ErrNoLooping
 	}
-
-	if c.status != StatusStart {
+	if atomic.LoadInt32(&c.status) != StatusStart {
 		return ErrNotStart
 	}
-	return c._send(data)
+
+	c.audioMu.Lock()
+	defer c.audioMu.Unlock()
+	return c.send(data)
 }
 
 func (c *Client) Close() {
-	c.isLoopingRead = 0
-	c.status = StatusInit
+	c.closeOnce.Do(func() {
+		atomic.StoreInt32(&c.running, 0)
+		atomic.StoreInt32(&c.status, StatusInit)
+		_ = c.tcpConn.Close()
 
-	if c.tcpConn != nil {
-		c.tcpConn.Close()
-		c.tcpConn = nil
-	}
-	if c.udpConn != nil {
-		c.udpConn.Close()
-		c.udpConn = nil
-		c.isLoopingRead = 0
-	}
+		c.audioMu.Lock()
+		if c.udpConn != nil {
+			_ = c.udpConn.Close()
+			c.udpConn = nil
+		}
+		c.audioMu.Unlock()
+	})
+}
+
+func (c *Client) isRunning() bool {
+	return atomic.LoadInt32(&c.running) == 1
 }
 
 func (c *Client) loopResponse() {
-	if c.cb == nil {
-		panic("c.cb is nil")
-	}
+	defer func() {
+		atomic.StoreInt32(&c.status, StatusInit)
+		atomic.StoreInt32(&c.running, 0)
+		close(c.done)
+	}()
+
 	reader := json.NewDecoder(c.tcpConn)
-	var err error = nil
 	for {
-		allRsp := AllResponse{}
-		err = reader.Decode(&allRsp)
-		if err != nil {
-			break
-		}
-		switch allRsp.Type {
-		case TypeRspStart:
-			c.startRspChan <- &allRsp
-		case TypeRspEnd:
-			c.endRspChan <- &allRsp
-		case TypeStop:
-			sr := StopResponse{
-				Type:            allRsp.Type,
-				Error:           allRsp.Error,
-				ConnectionClose: allRsp.ConnectionClose,
+		response := AllResponse{}
+		if err := reader.Decode(&response); err != nil {
+			if c.isRunning() && !errors.Is(err, io.EOF) {
+				log.Printf("x client response loop: %v", err)
 			}
-			if sr.ConnectionClose {
-				break
-			} else {
-				c.status = StatusEnd
+			return
+		}
+
+		switch response.Type {
+		case TypeRspStart:
+			queueResponse(c.startRspChan, &response)
+		case TypeRspEnd:
+			queueResponse(c.endRspChan, &response)
+		case TypeStop:
+			if !response.ConnectionClose {
+				atomic.StoreInt32(&c.status, StatusEnd)
+			}
+			if err := c.cb(&response); err != nil {
+				log.Printf("x client stop callback: %v", err)
+			}
+			if response.ConnectionClose {
+				return
 			}
 		default:
-			if c.cb != nil {
-				c.cb(&allRsp)
+			if err := c.cb(&response); err != nil {
+				log.Printf("x client result callback: %v", err)
 			}
 		}
 	}
-	fmt.Println("loopResponse err := ", err.Error())
-	c.status = StatusInit
-	atomic.AddInt32(&c.isLoopingRead, -1)
+}
+
+func queueResponse(queue chan *AllResponse, response *AllResponse) {
+	select {
+	case queue <- response:
+		return
+	default:
+	}
+	select {
+	case <-queue:
+	default:
+	}
+	select {
+	case queue <- response:
+	default:
+	}
 }
 
 func (c *Client) getStartRsp() (*StartResponse, error) {
-	timer := time.NewTimer(time.Second * 5)
-	var allRsp *AllResponse
+	timer := time.NewTimer(responseTimeout)
+	defer timer.Stop()
 	select {
-	case allRsp = <-c.startRspChan:
-		timer.Stop()
+	case response := <-c.startRspChan:
+		return &StartResponse{
+			Type:      response.Type,
+			SessionID: response.SessionID,
+			TaskID:    response.TaskID,
+			UDPPort:   response.UDPPort,
+			Error:     response.Error,
+		}, nil
+	case <-c.done:
+		return nil, ErrNoLooping
 	case <-timer.C:
 		return nil, ErrStartRspTimeOut
 	}
-	return &StartResponse{
-		Type:      allRsp.Type,
-		SessionID: allRsp.SessionID,
-		TaskID:    allRsp.TaskID,
-		UDPPort:   allRsp.UDPPort,
-		Error:     allRsp.Error,
-	}, nil
 }
 
-func (c *Client) _start(conf *StartConfig) error {
-	start := Start{
-		Cmd:    CmdStart,
-		Config: *conf,
+func (c *Client) start(config StartConfig) error {
+	request := Start{Cmd: CmdStart, Config: config}
+	if err := json.NewEncoder(c.tcpConn).Encode(request); err != nil {
+		return err
 	}
-	buf, err := json.Marshal(&start)
+	response, err := c.getStartRsp()
 	if err != nil {
 		return err
 	}
-	_, err = c.tcpConn.Write(buf)
-	if err != nil {
-		return err
-	}
-
-	startRsp, err := c.getStartRsp()
-	if err != nil {
-		return err
-	}
-	if startRsp.Type != TypeRspStart {
+	if response.Type != TypeRspStart {
 		return ErrNotStart
 	}
+	if response.Error.Msg != "" {
+		return errors.New(response.Error.Msg)
+	}
 
-	c.sessionID = startRsp.SessionID
-	c.udpPort = startRsp.UDPPort
+	c.sessionID = response.SessionID
+	c.udpPort = response.UDPPort
 	return nil
 }
 
-func (c *Client) _end() error {
-	end := End{
-		Cmd: CmdEnd,
-	}
-	buf, err := json.Marshal(&end)
-	if err != nil {
-		return err
-	}
-	_, err = c.tcpConn.Write(buf)
-	if err != nil {
+func (c *Client) end() error {
+	if err := json.NewEncoder(c.tcpConn).Encode(End{Cmd: CmdEnd}); err != nil {
 		return err
 	}
 
+	timer := time.NewTimer(responseTimeout)
+	defer timer.Stop()
 	select {
-	case allRsp := <-c.endRspChan:
-		if allRsp.Type != TypeRspEnd {
+	case response := <-c.endRspChan:
+		if response.Type != TypeRspEnd {
 			return ErrNotEnd
 		}
-	case <-time.After(time.Second * 5):
+		if response.Error.Msg != "" {
+			return errors.New(response.Error.Msg)
+		}
+		return nil
+	case <-c.done:
+		return ErrNoLooping
+	case <-timer.C:
 		return ErrEndRspTimeOut
 	}
-	return nil
 }
 
-func (c *Client) _send(data []byte) (err error) {
+func (c *Client) send(data []byte) error {
 	c.buffer.Write(data)
-
 	if c.udpConn == nil {
-		addr := net.UDPAddr{
-			IP:   net.ParseIP(c.agentIP),
-			Port: int(c.udpPort),
-		}
-		c.udpConn, err = net.DialUDP("udp", nil, &addr)
+		addr := net.UDPAddr{IP: net.ParseIP(c.agentIP), Port: int(c.udpPort)}
+		conn, err := net.DialUDP("udp", nil, &addr)
 		if err != nil {
 			return err
 		}
+		c.udpConn = conn
 	}
-	// 先判断一下长度
 	if c.buffer.Len() < UDPSendLen {
 		return nil
 	}
-	// 这里用 false ，因为每次写入buffer的数据是一个采样
-	return c.sentBuffer(false)
+	return c.sendBuffered(false)
 }
 
-func (c *Client) sentBuffer(sendALL bool) error {
-	// 这里处理 IP 分片啊
-	var err error = nil
-	bufAll := make([]byte, UDPSendLen+16)
-	for {
-		buf := bufAll[0:]
-		if c.buffer.Len() < UDPSendLen {
-			if sendALL {
-				buf = bufAll[0 : c.buffer.Len()+16]
-			} else {
-				buf = bufAll[0:16]
-			}
+func (c *Client) sendBuffered(sendAll bool) error {
+	for c.buffer.Len() >= UDPSendLen || (sendAll && c.buffer.Len() > 0) {
+		if c.udpConn == nil {
+			return errors.New("x client UDP connection is nil")
 		}
-
-		if len(buf) <= 16 {
-			break
+		payloadLen := UDPSendLen
+		if c.buffer.Len() < payloadLen {
+			payloadLen = c.buffer.Len()
 		}
-
-		binary.BigEndian.PutUint32(buf[0:4], c.sessionID)
-		binary.BigEndian.PutUint32(buf[4:8], c.seq)
-		_, err = c.buffer.Read(buf[16:])
-		if err != nil {
+		packet := make([]byte, udpHeaderLen+payloadLen)
+		binary.BigEndian.PutUint32(packet[0:4], c.sessionID)
+		binary.BigEndian.PutUint32(packet[4:8], c.seq)
+		if _, err := io.ReadFull(&c.buffer, packet[udpHeaderLen:]); err != nil {
 			return err
 		}
-
-		_, err = c.udpConn.Write(buf)
-		if err != nil {
+		if _, err := c.udpConn.Write(packet); err != nil {
 			return err
 		}
 		c.seq++

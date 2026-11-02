@@ -3,8 +3,9 @@ package main
 import (
 	"bytes"
 	"errors"
-	"github.com/realzhangm/xaux/pkg/resample/resample"
 	"sync"
+
+	"github.com/realzhangm/xaux/pkg/resample/resample"
 )
 
 type ReSampler struct {
@@ -12,22 +13,23 @@ type ReSampler struct {
 	buff *bytes.Buffer
 }
 
-var (
-	res4816Pool = sync.Pool{New: func() any {
-		var err error = nil
-		res4816 := new(ReSampler)
-		res4816.buff = new(bytes.Buffer)
-		res4816.res, err = resample.New(res4816.buff,
-			48000, 16000, 1, resample.I16, resample.HighQ)
-		if err != nil {
-			return nil
-		}
-		return res4816
-	}}
-)
+var res4816Pool = sync.Pool{New: func() any {
+	resampler := &ReSampler{buff: new(bytes.Buffer)}
+	var err error
+	resampler.res, err = resample.New(resampler.buff,
+		48000, 16000, 1, resample.I16, resample.HighQ)
+	if err != nil {
+		return nil
+	}
+	return resampler
+}}
 
 func getRes4816() *ReSampler {
-	return res4816Pool.Get().(*ReSampler)
+	value := res4816Pool.Get()
+	if value == nil {
+		return nil
+	}
+	return value.(*ReSampler)
 }
 
 func putRes4816(res *ReSampler) {
@@ -41,10 +43,10 @@ func putRes4816(res *ReSampler) {
 
 func ReSample4816(input []byte) ([]byte, error) {
 	res := getRes4816()
-	defer putRes4816(res)
 	if res == nil {
-		return nil, errors.New("res is nil")
+		return nil, errors.New("resampler is nil")
 	}
+	defer putRes4816(res)
 	_, err := res.res.Write(input)
 	if err != nil {
 		return nil, err

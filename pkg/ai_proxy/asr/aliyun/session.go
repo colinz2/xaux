@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	nls "github.com/aliyun/alibabacloud-nls-go-sdk"
@@ -17,9 +19,9 @@ var _ x.ISession = (*Session)(nil)
 var _ x.ISessionMaker = (*SessionMaker)(nil)
 
 var (
-	AKID   = "xxxx"
-	AKKEY  = "xxxx"
-	APPKEY = "xxxx"
+	AKID   = os.Getenv("ALI_AKID")
+	AKKEY  = os.Getenv("ALI_AKKEY")
+	APPKEY = os.Getenv("ALI_APPKEY")
 
 	WsUrlBeijing = "wss://nls-gateway-cn-beijing.aliyuncs.com/ws/v1"
 )
@@ -51,40 +53,32 @@ type NLSStatus struct {
 
 func (n *NLSStatus) reset() {
 	n.Lock()
+	defer n.Unlock()
 	n.status = NLSStatusNone
-	n.Unlock()
 }
 
 func (n *NLSStatus) setOpened() bool {
-	ok := false
 	n.Lock()
-	if n.status&NLSStatusOpened == 0 {
-		ok = true
-		n.status = NLSStatusOpened
+	defer n.Unlock()
+	if n.status&NLSStatusOpened != 0 {
+		return false
 	}
-	n.Unlock()
-	return ok
+	n.status = NLSStatusOpened
+	return true
 }
 
 func (n *NLSStatus) setClosed() bool {
-	ok := false
 	n.Lock()
-	if n.status&NLSStatusClosed == 0 {
-		ok = true
-		n.status = NLSStatusClosed
+	defer n.Unlock()
+	if n.status&NLSStatusClosed != 0 {
+		return false
 	}
-	n.Unlock()
-	return ok
+	n.status = NLSStatusClosed
+	return true
 }
 
 type SessionMaker struct {
 	cnt uint32
-}
-
-func init() {
-	AKID = os.Getenv("ALI_AKID")
-	AKKEY = os.Getenv("ALI_AKKEY")
-	APPKEY = os.Getenv("ALI_APPKEY")
 }
 
 func SetSecureKey(akID, akKey, appKey string) {
@@ -97,31 +91,45 @@ func NewSessionMaker() *SessionMaker {
 	return &SessionMaker{}
 }
 
-func (s *SessionMaker) MakeSession(r x.IResponse) (x.ISession, error) {
-	sess := Session{id: s.cnt, netRsp: r.(*x.TCPResponse)}
-	err := sess.newNLS()
-	if err != nil {
+func (s *SessionMaker) MakeSession(response x.IResponse) (x.ISession, error) {
+	if response == nil {
+		return nil, errors.New("aliyun ASR response writer is nil")
+	}
+	sess := &Session{
+		id:     atomic.AddUint32(&s.cnt, 1) - 1,
+		netRsp: response,
+	}
+	if err := sess.newNLS(); err != nil {
 		return nil, err
 	}
-
-	s.cnt++
-	return &sess, nil
+	return sess, nil
 }
 
-// Session TODO,
-// 两个状态，一个是 nls 的状态，一个是本身的会话状态
 type Session struct {
-	id          uint32
-	netRsp      *x.TCPResponse
-	_st         *nls.SpeechTranscription
-	startConfig x.StartConfig
-	nlsStatus   NLSStatus
-	status      int32
-	mu          sync.Mutex
+	id                  uint32
+	netRsp              x.IResponse
+	speechTranscription *nls.SpeechTranscription
+	startConfig         x.StartConfig
+	nlsStatus           NLSStatus
+	status              int32
+	recorder            *x.AudioRecorder
+	mu                  sync.Mutex
 }
 
 func (s *Session) ID() uint32 {
 	return s.id
+}
+
+func (s *Session) SetAudioRecorder(recorder *x.AudioRecorder) {
+	s.mu.Lock()
+	s.recorder = recorder
+	s.mu.Unlock()
+}
+
+func (s *Session) audioRecorder() *x.AudioRecorder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recorder
 }
 
 func (s *Session) setStatus(newStatus int32) error {
@@ -144,16 +152,11 @@ func (s *Session) setStatus(newStatus int32) error {
 func (s *Session) getStatus() int32 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	status := s.status
-	return status
-}
-
-func (s *Session) getSpeechTrans() error {
-	return s.newNLS()
+	return s.status
 }
 
 func (s *Session) newNLS() error {
-	if ok := s.nlsStatus.setOpened(); !ok {
+	if !s.nlsStatus.setOpened() {
 		return nil
 	}
 	config, err := nls.NewConnectionConfigWithAKInfoDefault(WsUrlBeijing, APPKEY, AKID, AKKEY)
@@ -162,7 +165,7 @@ func (s *Session) newNLS() error {
 		return err
 	}
 
-	s._st, err = nls.NewSpeechTranscription(config, nil,
+	s.speechTranscription, err = nls.NewSpeechTranscription(config, nil,
 		onTaskFailed, onStarted,
 		onSentenceBegin, onSentenceEnd, onResultChanged,
 		onCompleted, onClose, s)
@@ -174,165 +177,153 @@ func (s *Session) newNLS() error {
 }
 
 func (s *Session) closeNLS() {
-	ok := s.nlsStatus.setClosed()
-	if ok {
-		s._st.Shutdown()
+	if s.nlsStatus.setClosed() && s.speechTranscription != nil {
+		s.speechTranscription.Shutdown()
 	}
 }
 
-func waitReady(ch chan bool) error {
+func waitReady(ch <-chan bool) error {
 	select {
 	case done := <-ch:
-		{
-			if !done {
-				fmt.Println("Wait failed")
-				return errors.New("wait failed")
-			}
-			fmt.Println("Wait done")
+		if !done {
+			return errors.New("wait failed")
 		}
 	case <-time.After(20 * time.Second):
-		{
-			fmt.Println("Wait timeout")
-			return errors.New("wait timeout")
-		}
+		return errors.New("wait timeout")
 	}
 	return nil
 }
 
-// 打开识别会话
 func (s *Session) startNLSSpeechTrans() error {
-	// new NLS
-	if err := s.getSpeechTrans(); err != nil {
+	if err := s.newNLS(); err != nil {
 		return err
 	}
 	param := nls.DefaultSpeechTranscriptionParam()
-	param.Format = "pcm" //wav
-	exMap := make(map[string]interface{})
-	exMap["disfluency"] = true
-	exMap["enable_words"] = false
-	exMap["enable_semantic_sentence_detection"] = false
-	ready, err := s._st.Start(param, exMap)
+	param.Format = "pcm"
+	extra := map[string]interface{}{
+		"disfluency":                         true,
+		"enable_words":                       false,
+		"enable_semantic_sentence_detection": false,
+	}
+	ready, err := s.speechTranscription.Start(param, extra)
 	if err != nil {
 		s.closeNLS()
 		return err
 	}
-	return waitReady(ready)
+	if err := waitReady(ready); err != nil {
+		s.closeNLS()
+		return err
+	}
+	return nil
 }
 
-// 结束识别会话
 func (s *Session) stopNLSSpeechTrans() error {
-	ready, err := s._st.Stop()
+	ready, err := s.speechTranscription.Stop()
 	if err != nil {
 		s.closeNLS()
-		fmt.Println("xx error :", err.Error())
 		return err
 	}
-
-	err = waitReady(ready)
-	if err != nil {
+	if err := waitReady(ready); err != nil {
 		s.closeNLS()
-		fmt.Println("xxxx error :", err.Error())
 		return err
 	}
 	return nil
 }
 
-// 客户端发送 Start
 func (s *Session) onCmdStart() error {
-	err := s.setStatus(StatusSessionStarted)
-	if err != nil {
+	if s.getStatus() == StatusSessionStarted {
+		return ErrAlreadyStarted
+	}
+	if err := s.startNLSSpeechTrans(); err != nil {
 		return err
 	}
-
-	err = s.startNLSSpeechTrans()
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.setStatus(StatusSessionStarted)
 }
 
-// 客户端发送 End
 func (s *Session) onCmdEnd() error {
-	err := s.setStatus(StatusSessionFinished)
-	if err != nil {
+	if err := s.setStatus(StatusSessionFinished); err != nil {
 		return err
 	}
 	return s.stopNLSSpeechTrans()
 }
 
-// CloseAll 暂时是先关掉NLS连接
 func (s *Session) CloseAll() {
-	err := s.setStatus(StatusSessionFinished)
-	if err == nil {
-		s.stopNLSSpeechTrans()
+	if err := s.setStatus(StatusSessionFinished); err == nil {
+		_ = s.stopNLSSpeechTrans()
 	}
-	s.setStatus(StatusNone)
+	_ = s.setStatus(StatusNone)
 	s.closeNLS()
-	return
 }
 
-func (s *Session) CommandCb(allRequest *x.AllRequest) error {
-	//fmt.Println("client addr =", conn.RemoteAddr().String(), ":")
-	//buf, _ := json.MarshalIndent(allRequest, "", " ")
-	//fmt.Println(string(buf))
-	var rspBuf []byte
-	var err error = nil
-
-	switch allRequest.Cmd {
+func (s *Session) CommandCb(request *x.AllRequest) error {
+	var response interface{}
+	switch request.Cmd {
 	case x.CmdStart:
-		var startRsp x.StartResponse
-		err = s.onCmdStart()
-		if err != nil {
-			startRsp = x.StartResponse{
-				Type:  x.TypeRspStart,
-				Error: x.Error{Msg: err.Error()},
-			}
+		s.startConfig = request.Config
+		startResponse := x.StartResponse{Type: x.TypeRspStart}
+		if err := s.onCmdStart(); err != nil {
+			startResponse.Error = x.Error{Msg: err.Error()}
 		} else {
-			startRsp = x.StartResponse{
-				Type:      x.TypeRspStart,
-				SessionID: s.id,
-				UDPPort:   x.UDPPort,
-			}
+			startResponse.SessionID = s.id
+			startResponse.UDPPort = x.UDPPort
 		}
-		s.startConfig = allRequest.Config
-		rspBuf, _ = json.Marshal(&startRsp)
+		response = &startResponse
 	case x.CmdEnd:
-		endRsp := x.EndResponse{}
-		err = s.onCmdEnd()
-		if err != nil {
-			endRsp.Error = x.Error{Msg: err.Error()}
+		endResponse := x.EndResponse{Type: x.TypeRspEnd}
+		if err := s.onCmdEnd(); err != nil {
+			endResponse.Error = x.Error{Msg: err.Error()}
 		}
-		endRsp.Type = x.TypeRspEnd
-		rspBuf, _ = json.Marshal(&endRsp)
+		response = &endResponse
+	default:
+		return fmt.Errorf("unsupported command %q", request.Cmd)
 	}
-
-	_, err = s.netRsp.Write(rspBuf)
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.writeJSON(response)
 }
 
-func (s *Session) DataCb(data []byte, seq uint32) {
-	if s.getStatus() != StatusSessionStarted {
-		fmt.Println("s.status = ", s.getStatus())
+func (s *Session) DataCb(data []byte, _ uint32) {
+	if status := s.getStatus(); status != StatusSessionStarted {
+		log.Printf("aliyun session %d is not started: status=%d", s.id, status)
 		return
 	}
 
-	var buf16k []byte
-
-	// 这里是 48K
-	if s.startConfig.SampleRate == 48000 {
-		if resample.R48kTO16k != nil {
-			buf16k, _ = resample.R48kTO16k(data)
-		} else {
-			panic("resample not support")
+	var pcm16k []byte
+	switch s.startConfig.SampleRate {
+	case 48000:
+		if resample.R48kTO16k == nil {
+			log.Printf("aliyun session %d: resample plugin is unavailable", s.id)
+			return
 		}
-	} else if s.startConfig.SampleRate == 16000 {
-		buf16k = data[0:]
-	} else {
-		panic(fmt.Sprintf("not support SampleRate, %d", s.startConfig.SampleRate))
+		var err error
+		pcm16k, err = resample.R48kTO16k(data)
+		if err != nil {
+			log.Printf("aliyun session %d resample error: %v", s.id, err)
+			return
+		}
+	case 16000:
+		pcm16k = data
+	default:
+		log.Printf("aliyun session %d: unsupported sample rate %d", s.id, s.startConfig.SampleRate)
+		return
 	}
 
-	s._st.SendAudioData(buf16k)
+	if s.speechTranscription == nil {
+		log.Printf("aliyun session %d: speech transcription is unavailable", s.id)
+		return
+	}
+	if err := s.speechTranscription.SendAudioData(pcm16k); err != nil {
+		log.Printf("aliyun session %d send error: %v", s.id, err)
+		return
+	}
+	if recorder := s.audioRecorder(); recorder != nil {
+		recorder.WriteASR(pcm16k)
+	}
+}
+
+func (s *Session) writeJSON(value interface{}) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = s.netRsp.Write(data)
+	return err
 }

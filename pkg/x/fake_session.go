@@ -3,6 +3,7 @@ package x
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 )
 
 var _ ISessionMaker = (*FakeSessionMaker)(nil)
@@ -22,43 +23,43 @@ func NewFakeSessionMaker() *FakeSessionMaker {
 }
 
 func (f *FakeSessionMaker) MakeSession(response IResponse) (ISession, error) {
-	f.cnt++
-	return &FakeSession{id: f.cnt, netResponse: response}, nil
+	id := atomic.AddUint32(&f.cnt, 1)
+	return &FakeSession{id: id, netResponse: response}, nil
 }
 
 func (f *FakeSession) ID() uint32 {
 	return f.id
 }
 
-func (f *FakeSession) CloseAll() {
-	return
-}
+func (f *FakeSession) CloseAll() {}
 
-func (f *FakeSession) CommandCb(allResponse *AllRequest) error {
-	buf, _ := json.MarshalIndent(allResponse, "", " ")
-	fmt.Println(string(buf))
+func (f *FakeSession) CommandCb(request *AllRequest) error {
+	requestJSON, err := json.MarshalIndent(request, "", " ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(requestJSON))
 
-	cmd := allResponse.Cmd
-	var rspBuf []byte
-	if cmd == CmdStart {
-		startRsp := StartResponse{
-			Type:      cmd,
+	var response interface{}
+	switch request.Cmd {
+	case CmdStart:
+		response = &StartResponse{
+			Type:      TypeRspStart,
 			SessionID: f.id,
 			UDPPort:   UDPPort,
 		}
-		rspBuf, _ = json.Marshal(&startRsp)
-	} else if cmd == CmdEnd {
-		endRsp := EndResponse{
-			Type: cmd,
-		}
-		rspBuf, _ = json.Marshal(&endRsp)
+	case CmdEnd:
+		response = &EndResponse{Type: TypeRspEnd}
+	default:
+		return fmt.Errorf("unsupported command %q", request.Cmd)
 	}
-	_, err := f.netResponse.Write(rspBuf)
+
+	responseJSON, err := json.Marshal(response)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	return nil
+	_, err = f.netResponse.Write(responseJSON)
+	return err
 }
-func (f *FakeSession) DataCb(data []byte, seq uint32) {
-	return
-}
+
+func (f *FakeSession) DataCb(data []byte, seq uint32) {}

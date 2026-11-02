@@ -77,51 +77,53 @@ type SentenceEnd struct {
 }
 
 func (r *SentenceBegin) convertToX() *x.SentenceStartResponse {
-	xr := &x.SentenceStartResponse{
-		Type:        x.TypeSentenceStart,
-		StartResult: x.StartResult{},
+	return &x.SentenceStartResponse{
+		Type: x.TypeSentenceStart,
+		StartResult: x.StartResult{
+			Index: r.Payload.Index,
+			Time:  r.Payload.Time,
+		},
 	}
-	xr.StartResult.Time = r.Payload.Time
-	xr.StartResult.Index = r.Payload.Index
-	return xr
 }
 
 func (r *ResultChanged) convertToX() *x.RecognizingResponse {
-	xr := &x.RecognizingResponse{Type: x.TypeRecognizing}
-	xr.Result.Interim = true
-	xr.Result.Result = r.Payload.Result
-	xr.Result.Confidence = r.Payload.Confidence
-	xr.Result.Time = r.Payload.Time
-	xr.Result.Index = r.Payload.Index
-	for i := range r.Payload.Words {
-		xr.Result.Words = append(xr.Result.Words, func(words Words) x.Words {
-			w := x.Words{
-				Text:      words.Text,
-				StartTime: words.Starttime,
-				EndTime:   words.Endtime,
-			}
-			return w
-		}(r.Payload.Words[i]))
+	return &x.RecognizingResponse{
+		Type: x.TypeRecognizing,
+		Result: x.RecognizeResult{
+			Interim:    true,
+			Index:      r.Payload.Index,
+			Time:       r.Payload.Time,
+			Result:     r.Payload.Result,
+			Confidence: r.Payload.Confidence,
+			Words:      convertWords(r.Payload.Words),
+		},
 	}
-	return xr
 }
 
 func (r *SentenceEnd) convertToX() *x.RecognizingResponse {
-	xr := &x.RecognizingResponse{Type: x.TypeSentenceEnd}
-	xr.Result.Interim = false
-	xr.Result.Result = r.Payload.Result
-	xr.Result.Confidence = r.Payload.Confidence
-	xr.Result.Time = r.Payload.Time
-	xr.Result.Index = r.Payload.Index
-	for i := range r.Payload.Words {
-		xr.Result.Words = append(xr.Result.Words, func(words Words) x.Words {
-			w := x.Words{
-				Text:      words.Text,
-				StartTime: words.Starttime,
-				EndTime:   words.Endtime,
-			}
-			return w
-		}(r.Payload.Words[i]))
+	return &x.RecognizingResponse{
+		Type: x.TypeSentenceEnd,
+		Result: x.RecognizeResult{
+			Index:      r.Payload.Index,
+			Time:       r.Payload.Time,
+			Result:     r.Payload.Result,
+			Confidence: r.Payload.Confidence,
+			Words:      convertWords(r.Payload.Words),
+		},
 	}
-	return xr
+}
+
+func convertWords(words []Words) []x.Words {
+	if len(words) == 0 {
+		return nil
+	}
+	result := make([]x.Words, len(words))
+	for i, word := range words {
+		result[i] = x.Words{
+			Text:      word.Text,
+			StartTime: word.Starttime,
+			EndTime:   word.Endtime,
+		}
+	}
+	return result
 }
