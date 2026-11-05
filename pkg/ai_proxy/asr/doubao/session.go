@@ -20,6 +20,9 @@ const (
 	DefaultWSURL      = protocol.DefaultWSURL
 	DefaultResourceID = protocol.DefaultResourceID
 	connectTimeout    = 20 * time.Second
+	// audioQueueSize bounds the audio chunks waiting for the websocket
+	// sender; at roughly 45 ms of 16 kHz audio per chunk this is ~11 s.
+	audioQueueSize = 256
 )
 
 type Config = protocol.Config
@@ -93,16 +96,20 @@ type Session struct {
 	netRsp x.IResponse
 	config Config
 
-	mu           sync.Mutex
-	status       sessionStatus
-	startConfig  x.StartConfig
-	client       *protocol.AsrWsClient
-	done         chan error
-	pendingAudio []byte
-	streamErr    error
-	recorder     *x.AudioRecorder
+	mu            sync.Mutex
+	status        sessionStatus
+	startConfig   x.StartConfig
+	client        *protocol.AsrWsClient
+	done          chan error
+	sendDone      chan error
+	audioCh       chan []byte
+	droppedChunks uint64
+	streamErr     error
+	recorder      *x.AudioRecorder
 
-	// Only the websocket receive goroutine accesses these fields.
+	// Set before the worker goroutines start; only the websocket receive
+	// goroutine accesses these fields afterwards.
+	logDebug        bool
 	seenUtterances  map[int]bool
 	finalUtterances map[int]bool
 	fallbackSeen    bool
@@ -120,17 +127,58 @@ func (s *Session) SetAudioRecorder(recorder *x.AudioRecorder) {
 	s.mu.Unlock()
 }
 
-func (s *Session) debugEnabled() bool {
+// sendLoop forwards queued audio to Doubao from a single goroutine so a slow
+// websocket write never blocks the shared UDP receive loop. The most recent
+// chunk is held back so it can carry the negative final sequence number; when
+// no audio arrived the final packet is empty.
+func (s *Session) sendLoop(client *protocol.AsrWsClient, audioCh <-chan []byte, sendDone chan<- error, recorder *x.AudioRecorder) {
+	var pending []byte
+	for chunk := range audioCh {
+		if pending != nil {
+			if err := client.SendAudio(pending, false); err != nil {
+				s.failStream(err)
+				log.Printf("doubao session %d send error: %v", s.id, err)
+				sendDone <- err
+				return
+			}
+			if recorder != nil {
+				recorder.WriteASR(pending)
+			}
+		}
+		pending = chunk
+	}
+
+	// audioCh is closed: the held chunk carries the final sequence number.
+	err := client.SendAudio(pending, true)
+	if err != nil {
+		s.failStream(err)
+		log.Printf("doubao session %d send final packet: %v", s.id, err)
+	} else if recorder != nil {
+		recorder.WriteASR(pending)
+	}
+	sendDone <- err
+}
+
+func (s *Session) failStream(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.recorder != nil
+	if s.streamErr == nil {
+		s.streamErr = err
+	}
+	if s.status == statusStarted {
+		s.status = statusFailed
+	}
 }
 
 func (s *Session) onCmdStart(startConfig x.StartConfig) error {
 	if err := s.beginStart(startConfig); err != nil {
 		return err
 	}
-	if s.debugEnabled() {
+	s.mu.Lock()
+	recorder := s.recorder
+	s.mu.Unlock()
+	debug := recorder != nil
+	if debug {
 		log.Printf("doubao session %d: connecting ASR, sample_rate=%d bits=%d", s.id, startConfig.SampleRate, startConfig.BitsPerSample)
 	}
 
@@ -148,6 +196,8 @@ func (s *Session) onCmdStart(startConfig x.StartConfig) error {
 	}
 
 	done := make(chan error, 1)
+	sendDone := make(chan error, 1)
+	audioCh := make(chan []byte, audioQueueSize)
 	s.mu.Lock()
 	if s.status == statusClosed {
 		s.mu.Unlock()
@@ -156,11 +206,15 @@ func (s *Session) onCmdStart(startConfig x.StartConfig) error {
 	}
 	s.client = client
 	s.done = done
+	s.sendDone = sendDone
+	s.audioCh = audioCh
+	s.logDebug = debug
 	s.status = statusStarted
 	s.mu.Unlock()
 
+	go s.sendLoop(client, audioCh, sendDone, recorder)
 	go s.receive(client, done)
-	if s.debugEnabled() {
+	if debug {
 		log.Printf("doubao session %d: ASR connected", s.id)
 	}
 	return nil
@@ -257,17 +311,20 @@ func (s *Session) onCmdEnd() error {
 	s.status = statusFinished
 	client := s.client
 	done := s.done
-	// Keep the most recent packet buffered so it can carry the negative final
-	// sequence number instead of requiring an extra empty audio packet.
-	err := client.SendAudio(s.pendingAudio, true)
-	if err == nil && s.recorder != nil {
-		s.recorder.WriteASR(s.pendingAudio)
-	}
-	s.pendingAudio = nil
+	sendDone := s.sendDone
+	// DataCb stops queueing once the status leaves statusStarted, so closing
+	// the channel here cannot race with a send into it.
+	close(s.audioCh)
 	s.mu.Unlock()
 	defer func() { _ = client.Close() }()
-	if err != nil {
-		return err
+
+	select {
+	case err := <-sendDone:
+		if err != nil {
+			return err
+		}
+	case <-time.After(connectTimeout):
+		return errors.New("timed out sending the final Doubao ASR audio packet")
 	}
 
 	select {
@@ -284,9 +341,12 @@ func (s *Session) CloseAll() {
 		s.mu.Unlock()
 		return
 	}
+	if s.status == statusStarted {
+		// Let sendLoop exit; its final write fails once the client closes.
+		close(s.audioCh)
+	}
 	s.status = statusClosed
 	client := s.client
-	s.pendingAudio = nil
 	s.mu.Unlock()
 	if client != nil {
 		_ = client.Close()
@@ -319,6 +379,8 @@ func (s *Session) CommandCb(request *x.AllRequest) error {
 	return s.writeJSON(response)
 }
 
+// DataCb runs on the shared UDP receive loop, so it only converts and queues
+// the audio; the blocking websocket write happens in sendLoop.
 func (s *Session) DataCb(data []byte, _ uint32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -326,33 +388,26 @@ func (s *Session) DataCb(data []byte, _ uint32) {
 		return
 	}
 
-	var pcm16k []byte
-	switch s.startConfig.SampleRate {
-	case 48000:
+	pcm16k := data
+	if s.startConfig.SampleRate == 48000 {
 		var err error
 		pcm16k, err = resample.R48kTO16k(data)
 		if err != nil {
 			log.Printf("doubao session %d resample error: %v", s.id, err)
 			return
 		}
-	case 16000:
-		pcm16k = data
-	default:
-		return
 	}
 
-	if len(s.pendingAudio) > 0 {
-		if err := s.client.SendAudio(s.pendingAudio, false); err != nil {
-			s.status = statusFailed
-			s.streamErr = err
-			log.Printf("doubao session %d send error: %v", s.id, err)
-			return
-		}
-		if s.recorder != nil {
-			s.recorder.WriteASR(s.pendingAudio)
+	// Copy because the caller reuses its UDP read buffer.
+	chunk := append([]byte(nil), pcm16k...)
+	select {
+	case s.audioCh <- chunk:
+	default:
+		s.droppedChunks++
+		if s.droppedChunks == 1 || s.droppedChunks%100 == 0 {
+			log.Printf("doubao session %d: audio queue full, dropped %d chunks", s.id, s.droppedChunks)
 		}
 	}
-	s.pendingAudio = append(s.pendingAudio[:0], pcm16k...)
 }
 
 func (s *Session) handleResponse(response *protocol.AsrResponse) error {
@@ -360,7 +415,7 @@ func (s *Session) handleResponse(response *protocol.AsrResponse) error {
 		return nil
 	}
 	result := response.PayloadMsg.Result
-	if s.debugEnabled() {
+	if s.logDebug {
 		log.Printf("doubao session %d: ASR response last=%t text_bytes=%d utterances=%d log_id=%s", s.id, response.IsLastPackage, len(result.Text), len(result.Utterances), result.Additions.LogID)
 	}
 	if len(result.Utterances) == 0 {

@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"sync"
-	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -47,7 +46,6 @@ type Conf struct {
 
 type Server struct {
 	Conf
-	sessionCnt   int64
 	sessionMap   map[uint32]ISession
 	tcpListener  net.Listener
 	udpConn      *net.UDPConn
@@ -73,7 +71,6 @@ func WithDebug(debug bool) Option {
 func NewServer(conf Conf, opts ...Option) *Server {
 	server := &Server{
 		Conf:       conf,
-		sessionCnt: 0,
 		sessionMap: make(map[uint32]ISession),
 	}
 	for _, op := range opts {
@@ -100,7 +97,6 @@ func (s *Server) getNewSession(conn net.Conn) (ISession, error) {
 	if err != nil {
 		return nil, err
 	}
-	atomic.AddInt64(&s.sessionCnt, 1)
 
 	s.sessionMu.Lock()
 	s.sessionMap[sess.ID()] = sess
@@ -176,7 +172,7 @@ func (s *Server) udpServerStart() error {
 		if err != nil {
 			return err
 		}
-		if dataLen <= 16 {
+		if dataLen <= udpHeaderLen {
 			continue
 		}
 
@@ -184,12 +180,13 @@ func (s *Server) udpServerStart() error {
 		seq := binary.BigEndian.Uint32(buf[4:8])
 		s.sessionMu.RLock()
 		sess, exists := s.sessionMap[sessionID]
-		if exists && sess.ID() == sessionID {
-			sess.DataCb(buf[16:dataLen], seq)
-		}
 		s.sessionMu.RUnlock()
-		if s.debug && !exists {
-			log.Printf("UDP packet for unknown session %d: seq=%d bytes=%d", sessionID, seq, dataLen-16)
+		if exists {
+			// Dispatch outside sessionMu so a slow session cannot block
+			// session setup and teardown on the TCP side.
+			sess.DataCb(buf[udpHeaderLen:dataLen], seq)
+		} else if s.debug {
+			log.Printf("UDP packet for unknown session %d: seq=%d bytes=%d", sessionID, seq, dataLen-udpHeaderLen)
 		}
 	}
 }

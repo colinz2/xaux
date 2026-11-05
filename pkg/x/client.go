@@ -20,6 +20,10 @@ const (
 	UDPSendLen      = 1460
 	udpHeaderLen    = 16
 	responseTimeout = 5 * time.Second
+	// maxAudioDelay bounds how long audio smaller than UDPSendLen may stay
+	// buffered before being flushed. Without it a slow or bursty capture
+	// source can starve the ASR stream and trigger upstream idle timeouts.
+	maxAudioDelay = 100 * time.Millisecond
 )
 
 var (
@@ -41,6 +45,7 @@ type Client struct {
 	seq       uint32
 	agentIP   string
 	buffer    bytes.Buffer
+	lastSend  time.Time
 
 	startRspChan chan *AllResponse
 	endRspChan   chan *AllResponse
@@ -76,6 +81,7 @@ func NewClient(agentAddr string, cb AsrResultCallBack) (*Client, error) {
 		cb:           cb,
 	}
 	go client.loopResponse()
+	go client.loopFlush()
 	return client, nil
 }
 
@@ -184,6 +190,30 @@ func (c *Client) loopResponse() {
 				log.Printf("x client result callback: %v", err)
 			}
 		}
+	}
+}
+
+// loopFlush periodically sends audio that is still below UDPSendLen so the
+// stream keeps flowing even when Send is called with small or bursty chunks.
+func (c *Client) loopFlush() {
+	ticker := time.NewTicker(maxAudioDelay / 2)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-ticker.C:
+		}
+		if atomic.LoadInt32(&c.status) != StatusStart {
+			continue
+		}
+		c.audioMu.Lock()
+		if c.buffer.Len() > 0 && c.udpConn != nil && time.Since(c.lastSend) >= maxAudioDelay {
+			if err := c.sendBuffered(true); err != nil {
+				log.Printf("x client: flush buffered audio: %v", err)
+			}
+		}
+		c.audioMu.Unlock()
 	}
 }
 
@@ -300,6 +330,7 @@ func (c *Client) sendBuffered(sendAll bool) error {
 		if _, err := c.udpConn.Write(packet); err != nil {
 			return err
 		}
+		c.lastSend = time.Now()
 		c.seq++
 	}
 	return nil

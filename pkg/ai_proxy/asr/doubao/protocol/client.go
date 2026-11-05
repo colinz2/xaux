@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -15,11 +14,13 @@ var ErrAudioFinished = errors.New("doubao audio stream already finished")
 
 // AsrWsClient implements the bidirectional streaming part of the Doubao
 // websocket protocol. Audio data is supplied by the caller instead of a file.
+// SendAudio must be called from a single goroutine; Close may be called
+// concurrently with SendAudio and Receive (gorilla/websocket documents Close
+// as safe to call concurrently with all other methods).
 type AsrWsClient struct {
 	seq      int32
 	url      string
 	connect  *websocket.Conn
-	writeMu  sync.Mutex
 	finished bool
 }
 
@@ -88,8 +89,6 @@ func (c *AsrWsClient) Start(ctx context.Context, config Config, payload AsrReque
 // SendAudio sends one binary audio packet. The final packet must have last set
 // to true so its sequence number is negative, as required by the protocol.
 func (c *AsrWsClient) SendAudio(segment []byte, last bool) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
 	if c.connect == nil {
 		return errors.New("doubao websocket is not connected")
 	}
@@ -145,8 +144,6 @@ func (c *AsrWsClient) Receive(handler func(*AsrResponse) error) error {
 }
 
 func (c *AsrWsClient) Close() error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
 	if c.connect == nil {
 		return nil
 	}

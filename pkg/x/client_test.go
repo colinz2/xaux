@@ -47,6 +47,37 @@ func TestClientSendsRemainingAudioBeforeEnd(t *testing.T) {
 	}
 }
 
+func TestClientFlushesSmallAudioWithoutEnd(t *testing.T) {
+	client, udp := newTestClient(t, "", "")
+	payload := []byte{5, 6, 7, 8}
+	if err := client.Start(StartConfig{SampleRate: 16000, BitsPerSample: 16}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Send(payload); err != nil {
+		t.Fatal(err)
+	}
+
+	// The payload is smaller than UDPSendLen, so only the timed flush can
+	// deliver it before End is called.
+	if err := udp.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	packet := make([]byte, 2048)
+	n, _, err := udp.ReadFromUDP(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != udpHeaderLen+len(payload) {
+		t.Fatalf("packet length = %d, want %d", n, udpHeaderLen+len(payload))
+	}
+	if !bytes.Equal(packet[udpHeaderLen:n], payload) {
+		t.Fatalf("payload = %v, want %v", packet[udpHeaderLen:n], payload)
+	}
+	if err := client.End(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientPropagatesStartError(t *testing.T) {
 	client, _ := newTestClient(t, "start failed", "")
 	err := client.Start(StartConfig{SampleRate: 16000})
